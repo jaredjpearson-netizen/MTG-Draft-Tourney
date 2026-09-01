@@ -399,7 +399,6 @@ function renderTournament() {
               <span class="games-count ${p2w > p1w ? "ahead" : ""}">${p2w}</span>
               <button class="icon-btn" data-game="${last.key}|${m.id}|p2|1" ${p2w >= 2 ? "disabled" : ""}>+</button>
             </div>
-            <span class="pname right">${esc(nameOf(m.p2))}</span>
           </div>`));
       }
     });
