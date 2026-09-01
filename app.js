@@ -386,14 +386,15 @@ function renderTournament() {
         const p1w = m.p1Wins || 0, p2w = m.p2Wins || 0;
         matchesList.appendChild(el(`
           <div class="match-row">
-            <span class="pname">${esc(nameOf(m.p1))}</span>
-            <div class="games-stepper">
+            <span class="pname" style="grid-column:1;grid-row:1;">${esc(nameOf(m.p1))}</span>
+            <span class="pname right" style="grid-column:3;grid-row:1;">${esc(nameOf(m.p2))}</span>
+            <div class="games-stepper" style="grid-column:1;grid-row:2;justify-self:start;">
               <button class="icon-btn" data-game="${last.key}|${m.id}|p1|-1" ${p1w <= 0 ? "disabled" : ""}>−</button>
               <span class="games-count ${p1w > p2w ? "ahead" : ""}">${p1w}</span>
               <button class="icon-btn" data-game="${last.key}|${m.id}|p1|1" ${p1w >= 2 ? "disabled" : ""}>+</button>
             </div>
-            <span style="color:var(--ink-soft);font-size:13px;">games won</span>
-            <div class="games-stepper">
+            <span class="games-label" style="grid-column:2;grid-row:2;justify-self:center;">games won</span>
+            <div class="games-stepper" style="grid-column:3;grid-row:2;justify-self:end;">
               <button class="icon-btn" data-game="${last.key}|${m.id}|p2|-1" ${p2w <= 0 ? "disabled" : ""}>−</button>
               <span class="games-count ${p2w > p1w ? "ahead" : ""}">${p2w}</span>
               <button class="icon-btn" data-game="${last.key}|${m.id}|p2|1" ${p2w >= 2 ? "disabled" : ""}>+</button>

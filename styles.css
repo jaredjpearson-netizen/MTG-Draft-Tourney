@@ -129,12 +129,12 @@ input::placeholder, textarea::placeholder { color: #9c917a; }
 .list-item .x-btn { background: none; border: none; cursor: pointer; color: var(--ink-soft); display:flex; }
 
 .match-row {
-  display: flex; align-items: center; justify-content: space-between; background: var(--cream);
-  border: 1px solid var(--parchment-line); border-radius: 9px; padding: 10px 12px; gap: 10px; margin-bottom: 8px;
-  flex-wrap: wrap;
+  display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; column-gap: 10px; row-gap: 8px;
+  background: var(--cream); border: 1px solid var(--parchment-line); border-radius: 9px; padding: 10px 12px; margin-bottom: 8px;
 }
-.match-row .pname { font-size: 14px; color: var(--ink); flex: 1 1 90px; min-width: 70px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.match-row .pname { font-size: 14px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .match-row .pname.right { text-align: right; }
+.match-row .games-label { color: var(--ink-soft); font-size: 12.5px; white-space: nowrap; }
 .match-row .result-btns { display: flex; gap: 6px; }
 .games-stepper { display: flex; align-items: center; gap: 6px; }
 .games-count { width: 18px; text-align: center; font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; }
