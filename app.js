@@ -174,9 +174,17 @@ function hadBye(rounds, id) {
 }
 function generatePairings() {
   const rounds = roundsArray();
-  const standings = computeStandings().map((s) => ({ ...s, noise: Math.random() }));
-  standings.sort((a, b) => b.points - a.points || b.omw - a.omw || b.noise - a.noise);
-  let pool = standings.map((s) => s.id);
+  let pool;
+  if (rounds.length === 0) {
+    // Round 1: everyone's tied at 0 points, so standings order would just be
+    // random. Pair by seat order instead — the order players were added —
+    // so seat 1 faces seat 6, seat 2 faces seat 7, etc.
+    pool = playersArray().map((p) => p.id);
+  } else {
+    const standings = computeStandings().map((s) => ({ ...s, noise: Math.random() }));
+    standings.sort((a, b) => b.points - a.points || b.omw - a.omw || b.noise - a.noise);
+    pool = standings.map((s) => s.id);
+  }
   const matches = [];
   if (pool.length % 2 === 1) {
     let byeIdx = -1;
