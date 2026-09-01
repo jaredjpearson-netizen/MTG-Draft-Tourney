@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>MTG Draft Night</title>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<!-- Join / create event screen -->
+<div id="joinScreen">
+  <h1>MTG draft night</h1>
+  <p>Enter the event code your organizer shared, or leave blank to start a new one.</p>
+  <input id="joinCodeInput" type="text" maxlength="8" placeholder="EVENT CODE (e.g. FOIL42)" />
+  <div class="row">
+    <button class="btn" id="joinBtn" style="flex:1">Join / create event</button>
+  </div>
+</div>
+
+<!-- Main app -->
+<div id="app" style="display:none">
+  <header>
+    <span style="font-size:20px;">✦</span>
+    <input id="eventNameInput" type="text" />
+    <span id="eventMeta"></span>
+    <span id="codeBadge" title="Click to change event"></span>
+  </header>
+
+  <div class="tabs">
+    <div class="tab active" data-tab="players">👥 Players</div>
+    <div class="tab" data-tab="tournament">⚔ Tournament</div>
+    <div class="tab" data-tab="prizes">🏆 Prize draft</div>
+  </div>
+
+  <div class="panel">
+
+    <!-- PLAYERS TAB -->
+    <div class="tab-page active" id="page-players">
+      <h2 class="section-title">Who's at the table</h2>
+      <p class="section-sub" id="playersSub">Add everyone who's drafting tonight.</p>
+      <div class="field-row" id="addPlayerRow">
+        <input type="text" id="newPlayerInput" placeholder="Player name" />
+        <button class="btn" id="addPlayerBtn">+ Add</button>
+      </div>
+      <div class="list-grid" id="playersList"></div>
+    </div>
+
+    <!-- TOURNAMENT TAB -->
+    <div class="tab-page" id="page-tournament">
+      <div id="setupView">
+        <h2 class="section-title">Set up the tournament</h2>
+        <p class="section-sub">Swiss pairings — everyone plays every round, matched against similar records.</p>
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:18px;">
+          <label style="font-size:14px;color:var(--ink);">Number of rounds</label>
+          <button class="icon-btn" id="roundsMinus">−</button>
+          <span id="roundsCount" style="width:24px;text-align:center;font-weight:700;color:var(--ink);">3</span>
+          <button class="icon-btn" id="roundsPlus">+</button>
+        </div>
+        <button class="btn" id="startTournamentBtn">⚔ Start tournament</button>
+        <p id="needPlayersMsg" style="color:var(--ink-soft);font-size:13px;margin-top:10px;display:none;">Add at least 2 players first.</p>
+      </div>
+
+      <div id="runningView" style="display:none;">
+        <div class="two-col">
+          <div>
+            <h2 class="section-title" id="roundTitle">Round 1</h2>
+            <p class="section-sub" id="roundSub">Tap a result to record it.</p>
+            <div id="matchesList"></div>
+            <div style="display:flex;gap:10px;margin-top:6px;align-items:center;">
+              <button class="btn" id="nextRoundBtn">Generate next round</button>
+              <button class="btn wine small" id="resetTournamentBtn">↺ Reset tournament</button>
+            </div>
+          </div>
+          <div>
+            <h2 class="section-title">Standings</h2>
+            <p class="section-sub">Match points, 3 / 1 / 0.</p>
+            <div id="standingsList"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- PRIZE DRAFT TAB -->
+    <div class="tab-page" id="page-prizes">
+      <div id="prizeSetupView">
+        <div class="two-col">
+          <div>
+            <h2 class="section-title">Prize pool</h2>
+            <p class="section-sub">Bulk-add one card per line, or drop them in one at a time.</p>
+            <textarea id="bulkCardsInput" rows="4" placeholder="Sheoldred, the Apocalypse&#10;Ragavan, Nimble Pilferer&#10;Wrenn and Six"></textarea>
+            <div class="field-row" style="margin-top:8px;">
+              <button class="btn small" id="addBulkBtn">Add lines to pool</button>
+            </div>
+            <div class="field-row">
+              <input type="text" id="singleCardInput" placeholder="Add a single card" />
+              <button class="btn" id="addSingleBtn">+</button>
+            </div>
+            <div id="poolHeader" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"></div>
+            <div id="poolList" style="display:flex;flex-direction:column;gap:6px;max-height:220px;overflow-y:auto;"></div>
+          </div>
+          <div>
+            <h2 class="section-title">Pick order</h2>
+            <p class="section-sub">Choose who picks first, then fine-tune by hand if you like.</p>
+            <div class="field-row">
+              <button class="btn small" id="orderWinnerBtn">Winner picks first</button>
+              <button class="btn small" id="orderLastBtn">Last place picks first</button>
+            </div>
+            <p style="font-size:12.5px;color:var(--ink-soft);margin-bottom:10px;">
+              Snake order — it reverses each time through the table, so nobody picks last twice in a row.
+            </p>
+            <div id="orderList" style="margin-bottom:14px;"></div>
+            <button class="btn" id="beginDraftBtn">🏆 Start prize draft</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="prizeActiveView" style="display:none;">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;margin-bottom:16px;">
+          <div>
+            <h2 class="section-title" id="prizeTitle">Prize draft</h2>
+            <p class="section-sub" id="prizeSub"></p>
+          </div>
+          <div style="display:flex;gap:8px;">
+            <button class="btn wine small" id="undoPickBtn">↩ Undo last pick</button>
+            <button class="btn wine small" id="restartDraftBtn">↺ Restart draft</button>
+          </div>
+        </div>
+        <div class="picker-banner" id="pickerBanner" style="display:none;"></div>
+        <div class="cards-grid" id="cardsGrid"></div>
+        <h2 class="section-title" id="resultsTitle">Results</h2>
+        <p class="section-sub" id="resultsSub">Filled in as picks happen.</p>
+        <div class="results-grid" id="resultsGrid"></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<script src="firebase-config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
