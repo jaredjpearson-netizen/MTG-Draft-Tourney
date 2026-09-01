@@ -5,6 +5,9 @@
 firebase.initializeApp(firebaseConfig);
 const db = firebase.database();
 
+const emailjsReady = !!(window.emailjs && emailjsConfig.publicKey && emailjsConfig.publicKey !== "YOUR_PUBLIC_KEY");
+if (emailjsReady) emailjs.init({ publicKey: emailjsConfig.publicKey });
+
 let eventCode = null;
 let eventRef = null;
 let state = {}; // live mirror of the event's DB node
@@ -39,8 +42,6 @@ function openEvent(code) {
         started: false,
         rounds: {},
         prizePool: {},
-        orderMode: "winner-first",
-        manualOrder: null,
         draftStarted: false,
         claims: {},
       });
@@ -111,29 +112,57 @@ function computeStandings() {
   const players = playersArray();
   const rounds = roundsArray();
   const stats = {};
-  players.forEach((p) => { stats[p.id] = { id: p.id, name: p.name, points: 0, wins: 0, losses: 0, draws: 0, byes: 0, opponents: [] }; });
+  players.forEach((p) => {
+    stats[p.id] = {
+      id: p.id, name: p.name, points: 0, wins: 0, losses: 0, draws: 0, byes: 0,
+      matchesPlayed: 0, gamesWon: 0, gamesLost: 0, opponents: [],
+    };
+  });
   rounds.forEach((round) => {
     round.matches.forEach((m) => {
       if (m.bye) {
-        if (stats[m.p1]) { stats[m.p1].points += 3; stats[m.p1].wins += 1; stats[m.p1].byes += 1; }
+        const s = stats[m.p1];
+        // a bye counts as a win, and (per standard tournament rules) as a 2-0 game record
+        if (s) { s.points += 3; s.wins += 1; s.byes += 1; s.matchesPlayed += 1; s.gamesWon += 2; }
         return;
       }
       const p1Wins = m.p1Wins || 0;
       const p2Wins = m.p2Wins || 0;
       if (p1Wins + p2Wins === 0 || !stats[m.p1] || !stats[m.p2]) return;
-      stats[m.p1].opponents.push(m.p2);
-      stats[m.p2].opponents.push(m.p1);
-      if (p1Wins > p2Wins) { stats[m.p1].points += 3; stats[m.p1].wins += 1; stats[m.p2].losses += 1; }
-      else if (p2Wins > p1Wins) { stats[m.p2].points += 3; stats[m.p2].wins += 1; stats[m.p1].losses += 1; }
-      else { stats[m.p1].points += 1; stats[m.p2].points += 1; stats[m.p1].draws += 1; stats[m.p2].draws += 1; }
+      const s1 = stats[m.p1], s2 = stats[m.p2];
+      s1.matchesPlayed += 1; s2.matchesPlayed += 1;
+      s1.gamesWon += p1Wins; s1.gamesLost += p2Wins;
+      s2.gamesWon += p2Wins; s2.gamesLost += p1Wins;
+      s1.opponents.push(m.p2); s2.opponents.push(m.p1);
+      if (p1Wins > p2Wins) { s1.points += 3; s1.wins += 1; s2.losses += 1; }
+      else if (p2Wins > p1Wins) { s2.points += 3; s2.wins += 1; s1.losses += 1; }
+      else { s1.points += 1; s2.points += 1; s1.draws += 1; s2.draws += 1; }
     });
   });
   const list = Object.values(stats);
+  // Standard tournament tiebreaker math: percentages are floored at 1/3 so a
+  // player (or bye) with a very short/rough record doesn't unfairly tank
+  // their opponents' numbers.
+  const FLOOR = 1 / 3;
   list.forEach((s) => {
-    const oppPts = s.opponents.map((oid) => stats[oid]?.points ?? 0);
-    s.tiebreak = oppPts.length ? oppPts.reduce((a, b) => a + b, 0) / oppPts.length : 0;
+    s.matchWinPct = s.matchesPlayed > 0 ? Math.max(FLOOR, s.points / (3 * s.matchesPlayed)) : FLOOR;
+    const gamesPlayed = s.gamesWon + s.gamesLost;
+    s.gameWinPct = gamesPlayed > 0 ? Math.max(FLOOR, s.gamesWon / gamesPlayed) : FLOOR;
   });
-  list.sort((a, b) => b.points - a.points || b.tiebreak - a.tiebreak || a.name.localeCompare(b.name));
+  list.forEach((s) => {
+    if (s.opponents.length) {
+      s.omw = s.opponents.reduce((sum, oid) => sum + (stats[oid]?.matchWinPct ?? FLOOR), 0) / s.opponents.length;
+      s.ogw = s.opponents.reduce((sum, oid) => sum + (stats[oid]?.gameWinPct ?? FLOOR), 0) / s.opponents.length;
+    } else { s.omw = 0; s.ogw = 0; }
+  });
+  // 1. Match points  2. Opponents' match-win %  3. Game-win %  4. Opponents' game-win %
+  list.sort((a, b) =>
+    b.points - a.points ||
+    b.omw - a.omw ||
+    b.gameWinPct - a.gameWinPct ||
+    b.ogw - a.ogw ||
+    a.name.localeCompare(b.name)
+  );
   return list;
 }
 function playedBefore(rounds, a, b) {
@@ -145,7 +174,7 @@ function hadBye(rounds, id) {
 function generatePairings() {
   const rounds = roundsArray();
   const standings = computeStandings().map((s) => ({ ...s, noise: Math.random() }));
-  standings.sort((a, b) => b.points - a.points || b.tiebreak - a.tiebreak || b.noise - a.noise);
+  standings.sort((a, b) => b.points - a.points || b.omw - a.omw || b.noise - a.noise);
   let pool = standings.map((s) => s.id);
   const matches = [];
   if (pool.length % 2 === 1) {
@@ -172,10 +201,12 @@ function generatePairings() {
 --------------------------------------------------------- */
 function setEventName(name) { eventRef.child("eventName").set(name); }
 
-function addPlayer(name) {
+function addPlayer(name, email) {
   if (!name.trim() || state.started) return;
   const key = newKey("events/" + eventCode + "/players");
-  eventRef.child("players/" + key).set({ name: name.trim(), addedAt: Date.now() });
+  const data = { name: name.trim(), addedAt: Date.now() };
+  if (email && email.trim()) data.email = email.trim();
+  eventRef.child("players/" + key).set(data);
 }
 function removePlayer(id) { if (!state.started) eventRef.child("players/" + id).remove(); }
 
@@ -256,23 +287,16 @@ async function addSingleCard(name) {
 function removeCard(id) { if (!state.draftStarted) eventRef.child("prizePool/" + id).remove(); }
 function clearPool() { if (!state.draftStarted) eventRef.child("prizePool").remove(); }
 
-function setOrderMode(mode) { eventRef.update({ orderMode: mode, manualOrder: null }); }
-function setManualOrder(arr) { eventRef.child("manualOrder").set(arr); }
-function resetOrderToStandings() { eventRef.child("manualOrder").set(null); }
-
 function computeBaseOrder() {
-  const standingsIds = computeStandings().map((s) => s.id);
-  if (state.manualOrder && state.manualOrder.length === playersArray().length) return state.manualOrder;
-  const ids = [...standingsIds];
-  if (state.orderMode === "last-first") ids.reverse();
-  return ids;
+  // Winner picks first, in snake order — no longer configurable.
+  return computeStandings().map((s) => s.id);
 }
 
 function beginDraft() {
   const pool = state.prizePool || {};
   const players = playersArray();
   if (Object.keys(pool).length === 0 || players.length === 0) return;
-  eventRef.update({ draftStarted: true, claims: {}, pickOrderSnapshot: computeBaseOrder() });
+  eventRef.update({ draftStarted: true, claims: {}, pickOrderSnapshot: computeBaseOrder(), notifiedPick: -1 });
 }
 
 function currentPickerId() {
@@ -295,7 +319,43 @@ function undoLastPick() {
   if (!claims.length) return;
   eventRef.child("claims/" + claims[claims.length - 1][0]).remove();
 }
-function resetPrizeDraft() { eventRef.update({ draftStarted: false, claims: {}, pickOrderSnapshot: null }); }
+function resetPrizeDraft() { eventRef.update({ draftStarted: false, claims: {}, pickOrderSnapshot: null, notifiedPick: -1 }); }
+
+/* ---------------------------------------------------------
+   Turn notification emails (EmailJS — no backend needed)
+--------------------------------------------------------- */
+function sendPickEmail(player) {
+  if (!emailjsReady || !player || !player.email) return;
+  emailjs.send(emailjsConfig.serviceId, emailjsConfig.templateId, {
+    to_email: player.email,
+    player_name: player.name,
+    event_name: state.eventName || eventCode,
+    event_link: window.location.href,
+  }).catch((err) => console.error("Turn notification email failed:", err));
+}
+
+// Called on every render while the draft is active. Uses a Firebase
+// transaction as a lock so that even with several browsers/tabs open on
+// the same event, only one of them actually sends the email for a given pick.
+function notifyCurrentPickerIfNeeded() {
+  if (!emailjsReady || !state.draftStarted) return;
+  const pool = state.prizePool || {};
+  const claimsCount = Object.keys(state.claims || {}).length;
+  if (claimsCount >= Object.keys(pool).length) return; // draft complete, nobody left to notify
+  const pickerId = currentPickerId();
+  if (!pickerId) return;
+  const player = (state.players || {})[pickerId];
+  if (!player || !player.email) return;
+
+  eventRef.child("notifiedPick").transaction((current) => {
+    if (typeof current !== "number") current = -1;
+    if (current >= claimsCount) return; // already notified for this pick — abort, nothing to do
+    return claimsCount;
+  }, (error, committed) => {
+    if (error || !committed) return; // another client already handled this notification
+    sendPickEmail({ name: player.name, email: player.email });
+  });
+}
 
 /* ---------------------------------------------------------
    Render
@@ -344,8 +404,11 @@ function renderPlayers() {
   }
   players.forEach((p, i) => {
     const row = el(`
-      <div class="list-item">
-        <span><span style="color:var(--ink-soft);margin-right:6px;font-size:12.5px;">${i + 1}.</span>${esc(p.name)}</span>
+      <div class="list-item" style="align-items:flex-start;">
+        <span>
+          <span style="color:var(--ink-soft);margin-right:6px;font-size:12.5px;">${i + 1}.</span>${esc(p.name)}
+          ${p.email ? `<div style="font-size:11.5px;color:var(--ink-soft);margin-top:2px;">${esc(p.email)}</div>` : ""}
+        </span>
         ${state.started ? "" : `<button class="x-btn" data-remove-player="${p.id}">✕</button>`}
       </div>`);
     list.appendChild(row);
@@ -445,25 +508,6 @@ function renderPrizes() {
         </div>`));
     });
 
-    document.getElementById("orderWinnerBtn").classList.toggle("active", state.orderMode === "winner-first" && !state.manualOrder);
-    document.getElementById("orderLastBtn").classList.toggle("active", state.orderMode === "last-first" && !state.manualOrder);
-
-    const order = computeBaseOrder();
-    const orderList = document.getElementById("orderList");
-    orderList.innerHTML = "";
-    order.forEach((id, i) => {
-      orderList.appendChild(el(`
-        <div class="order-row">
-          <span><span style="color:var(--ink-soft);margin-right:6px;">${i + 1}.</span>${esc(nameOf(id))}</span>
-          <div class="btns">
-            <button class="icon-btn" data-move="${i}|-1" ${i === 0 ? "disabled" : ""}>▲</button>
-            <button class="icon-btn" data-move="${i}|1" ${i === order.length - 1 ? "disabled" : ""}>▼</button>
-          </div>
-        </div>`));
-    });
-    if (state.manualOrder) {
-      orderList.appendChild(el(`<button id="resetOrderBtn" style="background:none;border:none;color:var(--ink-soft);font-size:12.5px;cursor:pointer;margin-top:4px;">Reset to standings order</button>`));
-    }
     document.getElementById("beginDraftBtn").disabled = pool.length === 0 || players.length === 0;
     return;
   }
@@ -482,6 +526,7 @@ function renderPrizes() {
   if (!draftComplete) {
     banner.style.display = "block";
     banner.textContent = "Now picking: " + nameOf(currentPickerId());
+    notifyCurrentPickerIfNeeded();
   } else {
     banner.style.display = "none";
   }
@@ -520,10 +565,14 @@ document.getElementById("eventNameInput").addEventListener("change", (e) => setE
 
 document.getElementById("addPlayerBtn").addEventListener("click", () => {
   const input = document.getElementById("newPlayerInput");
-  addPlayer(input.value); input.value = "";
+  const emailInput = document.getElementById("newPlayerEmailInput");
+  addPlayer(input.value, emailInput.value); input.value = ""; emailInput.value = "";
 });
 document.getElementById("newPlayerInput").addEventListener("keydown", (e) => {
-  if (e.key === "Enter") { addPlayer(e.target.value); e.target.value = ""; }
+  if (e.key === "Enter") document.getElementById("addPlayerBtn").click();
+});
+document.getElementById("newPlayerEmailInput").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") document.getElementById("addPlayerBtn").click();
 });
 
 document.getElementById("roundsMinus").addEventListener("click", () => setTotalRounds((state.totalRounds || 3) - 1));
@@ -545,8 +594,6 @@ document.getElementById("addSingleBtn").addEventListener("click", () => {
 document.getElementById("singleCardInput").addEventListener("keydown", (e) => {
   if (e.key === "Enter") { addSingleCard(e.target.value); e.target.value = ""; }
 });
-document.getElementById("orderWinnerBtn").addEventListener("click", () => setOrderMode("winner-first"));
-document.getElementById("orderLastBtn").addEventListener("click", () => setOrderMode("last-first"));
 document.getElementById("beginDraftBtn").addEventListener("click", beginDraft);
 document.getElementById("undoPickBtn").addEventListener("click", undoLastPick);
 document.getElementById("restartDraftBtn").addEventListener("click", () => {
@@ -570,19 +617,6 @@ document.getElementById("app").addEventListener("click", (e) => {
 
   const cp = e.target.id === "clearPoolBtn" ? true : e.target.closest("#clearPoolBtn");
   if (cp) { if (confirm("Remove all cards from the prize pool?")) clearPool(); return; }
-
-  const mv = e.target.closest("[data-move]");
-  if (mv) {
-    const [idx, dir] = mv.dataset.move.split("|").map(Number);
-    const order = computeBaseOrder();
-    const j = idx + dir;
-    if (j < 0 || j >= order.length) return;
-    [order[idx], order[j]] = [order[j], order[idx]];
-    return setManualOrder(order);
-  }
-
-  const ro = e.target.id === "resetOrderBtn" ? true : e.target.closest("#resetOrderBtn");
-  if (ro) return resetOrderToStandings();
 
   const cc = e.target.closest("[data-claim]");
   if (cc) return claimCard(cc.dataset.claim);

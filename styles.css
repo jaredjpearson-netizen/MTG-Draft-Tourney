@@ -197,4 +197,6 @@ input::placeholder, textarea::placeholder { color: #9c917a; }
 @media (max-width: 600px) {
   #eventNameInput { font-size: 21px; }
   .panel { padding: 16px; }
+  #addPlayerRow { flex-wrap: wrap; }
+  #addPlayerRow input { flex: 1 1 140px; }
 }

@@ -41,6 +41,7 @@
       <p class="section-sub" id="playersSub">Add everyone who's drafting.</p>
       <div class="field-row" id="addPlayerRow">
         <input type="text" id="newPlayerInput" placeholder="Player name" />
+        <input type="text" id="newPlayerEmailInput" placeholder="Email (optional)" />
         <button class="btn" id="addPlayerBtn">+ Add</button>
       </div>
       <div class="list-grid" id="playersList"></div>
@@ -84,35 +85,19 @@
     <!-- PRIZE DRAFT TAB -->
     <div class="tab-page" id="page-prizes">
       <div id="prizeSetupView">
-        <div class="two-col">
-          <div>
-            <h2 class="section-title">Prize pool</h2>
-            <p class="section-sub">Bulk-add one card per line, or drop them in one at a time.</p>
-            <textarea id="bulkCardsInput" rows="4" placeholder="Sheoldred, the Apocalypse&#10;Ragavan, Nimble Pilferer&#10;Wrenn and Six"></textarea>
-            <div class="field-row" style="margin-top:8px;">
-              <button class="btn small" id="addBulkBtn">Add lines to pool</button>
-            </div>
-            <div class="field-row">
-              <input type="text" id="singleCardInput" placeholder="Add a single card" />
-              <button class="btn" id="addSingleBtn">+</button>
-            </div>
-            <div id="poolHeader" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"></div>
-            <div id="poolList" style="display:flex;flex-direction:column;gap:6px;max-height:220px;overflow-y:auto;"></div>
-          </div>
-          <div>
-            <h2 class="section-title">Pick order</h2>
-            <p class="section-sub">Choose who picks first, then fine-tune by hand if you like.</p>
-            <div class="field-row">
-              <button class="btn small" id="orderWinnerBtn">Winner picks first</button>
-              <button class="btn small" id="orderLastBtn">Last place picks first</button>
-            </div>
-            <p style="font-size:12.5px;color:var(--ink-soft);margin-bottom:10px;">
-              Snake order — it reverses each time through the table, so nobody picks last twice in a row.
-            </p>
-            <div id="orderList" style="margin-bottom:14px;"></div>
-            <button class="btn" id="beginDraftBtn">🏆 Start prize draft</button>
-          </div>
+        <h2 class="section-title">Prize pool</h2>
+        <p class="section-sub">Bulk-add one card per line, or drop them in one at a time. The tournament winner picks first, in snake order.</p>
+        <textarea id="bulkCardsInput" rows="4" placeholder="Sheoldred, the Apocalypse&#10;Ragavan, Nimble Pilferer&#10;Wrenn and Six"></textarea>
+        <div class="field-row" style="margin-top:8px;">
+          <button class="btn small" id="addBulkBtn">Add lines to pool</button>
         </div>
+        <div class="field-row">
+          <input type="text" id="singleCardInput" placeholder="Add a single card" />
+          <button class="btn" id="addSingleBtn">+</button>
+        </div>
+        <div id="poolHeader" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"></div>
+        <div id="poolList" style="display:flex;flex-direction:column;gap:6px;max-height:220px;overflow-y:auto;margin-bottom:16px;"></div>
+        <button class="btn" id="beginDraftBtn">🏆 Start prize draft</button>
       </div>
 
       <div id="prizeActiveView" style="display:none;">
@@ -139,7 +124,9 @@
 
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
 <script src="firebase-config.js"></script>
+<script src="emailjs-config.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
