@@ -3,14 +3,14 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>MTG Draft Night</title>
+<title>Magic Draft Tourney</title>
 <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
 
 <!-- Join / create event screen -->
 <div id="joinScreen">
-  <h1>MTG draft night</h1>
+  <h1>Magic Draft Tourney</h1>
   <p>Enter the event code your organizer shared, or leave blank to start a new one.</p>
   <input id="joinCodeInput" type="text" maxlength="8" placeholder="EVENT CODE (e.g. FOIL42)" />
   <div class="row">
@@ -63,7 +63,7 @@
 
       <div id="runningView" style="display:none;">
         <div class="two-col">
-          <div>
+          <div class="tourney-matches">
             <h2 class="section-title" id="roundTitle">Round 1</h2>
             <p class="section-sub" id="roundSub">Record games won by each player (best of 3).</p>
             <div id="matchesList"></div>
@@ -72,7 +72,7 @@
               <button class="btn wine small" id="resetTournamentBtn">↺ Reset tournament</button>
             </div>
           </div>
-          <div>
+          <div class="tourney-standings">
             <h2 class="section-title">Standings</h2>
             <p class="section-sub">Match points, 3 / 1 / 0.</p>
             <div id="standingsList"></div>

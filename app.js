@@ -33,7 +33,7 @@ function openEvent(code) {
   eventRef.once("value").then((snap) => {
     if (!snap.exists()) {
       eventRef.set({
-        eventName: "Friday Night Draft",
+        eventName: eventCode,
         players: {},
         totalRounds: 3,
         started: false,
@@ -197,7 +197,7 @@ function setGameWins(roundKey, matchId, side, delta) {
   const next = Math.max(0, Math.min(2, (match[field] || 0) + delta));
   eventRef.child("rounds/" + roundKey + "/matches/" + matchId + "/" + field).set(next);
 }
-function matchComplete(m) { return m.bye || (m.p1Wins || 0) + (m.p2Wins || 0) > 0; }
+function matchComplete(m) { return m.bye || (m.p1Wins || 0) >= 2 || (m.p2Wins || 0) >= 2; }
 
 function nextRound() {
   const rounds = roundsArray();

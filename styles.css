@@ -131,8 +131,9 @@ input::placeholder, textarea::placeholder { color: #9c917a; }
 .match-row {
   display: flex; align-items: center; justify-content: space-between; background: var(--cream);
   border: 1px solid var(--parchment-line); border-radius: 9px; padding: 10px 12px; gap: 10px; margin-bottom: 8px;
+  flex-wrap: wrap;
 }
-.match-row .pname { font-size: 14px; color: var(--ink); flex: 1 1 auto; min-width: 90px; }
+.match-row .pname { font-size: 14px; color: var(--ink); flex: 1 1 90px; min-width: 70px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .match-row .pname.right { text-align: right; }
 .match-row .result-btns { display: flex; gap: 6px; }
 .games-stepper { display: flex; align-items: center; gap: 6px; }
@@ -187,6 +188,8 @@ input::placeholder, textarea::placeholder { color: #9c917a; }
 
 .two-col { display: flex; gap: 24px; flex-wrap: wrap; }
 .two-col > div { flex: 1 1 320px; min-width: 260px; }
+.tourney-matches { flex: 3 1 420px; min-width: 300px; }
+.tourney-standings { flex: 1 1 200px; min-width: 190px; }
 
 .order-row { display: flex; align-items: center; justify-content: space-between; background: var(--cream); border: 1px solid var(--parchment-line); border-radius: 8px; padding: 7px 11px; font-size: 13.5px; margin-bottom: 6px; }
 .order-row .btns { display: flex; gap: 4px; }
