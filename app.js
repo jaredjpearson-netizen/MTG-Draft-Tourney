@@ -7,6 +7,7 @@ const db = firebase.database();
 
 const emailjsReady = !!(window.emailjs && emailjsConfig.publicKey && emailjsConfig.publicKey !== "YOUR_PUBLIC_KEY");
 if (emailjsReady) emailjs.init({ publicKey: emailjsConfig.publicKey });
+console.log("[MTG draft] EmailJS ready:", emailjsReady);
 
 let eventCode = null;
 let eventRef = null;
@@ -326,33 +327,39 @@ function resetPrizeDraft() { eventRef.update({ draftStarted: false, claims: {}, 
 --------------------------------------------------------- */
 function sendPickEmail(player) {
   if (!emailjsReady || !player || !player.email) return;
+  console.log("[MTG draft] Sending turn-notification email to", player.email, "(" + player.name + ")");
   emailjs.send(emailjsConfig.serviceId, emailjsConfig.templateId, {
     to_email: player.email,
     player_name: player.name,
     event_name: state.eventName || eventCode,
     event_link: window.location.href,
-  }).catch((err) => console.error("Turn notification email failed:", err));
+  }).then(
+    (res) => console.log("[MTG draft] Email sent OK:", res.status, res.text),
+    (err) => console.error("[MTG draft] Email FAILED to send:", err)
+  );
 }
 
 // Called on every render while the draft is active. Uses a Firebase
 // transaction as a lock so that even with several browsers/tabs open on
 // the same event, only one of them actually sends the email for a given pick.
 function notifyCurrentPickerIfNeeded() {
-  if (!emailjsReady || !state.draftStarted) return;
+  if (!state.draftStarted) return;
+  if (!emailjsReady) { console.log("[MTG draft] EmailJS not configured — skipping turn notification."); return; }
   const pool = state.prizePool || {};
   const claimsCount = Object.keys(state.claims || {}).length;
   if (claimsCount >= Object.keys(pool).length) return; // draft complete, nobody left to notify
   const pickerId = currentPickerId();
   if (!pickerId) return;
   const player = (state.players || {})[pickerId];
-  if (!player || !player.email) return;
+  if (!player || !player.email) { console.log("[MTG draft] Current picker has no email on file — skipping notification."); return; }
 
   eventRef.child("notifiedPick").transaction((current) => {
     if (typeof current !== "number") current = -1;
     if (current >= claimsCount) return; // already notified for this pick — abort, nothing to do
     return claimsCount;
   }, (error, committed) => {
-    if (error || !committed) return; // another client already handled this notification
+    if (error) { console.error("[MTG draft] Notification lock transaction errored:", error); return; }
+    if (!committed) return; // another client already handled this notification
     sendPickEmail({ name: player.name, email: player.email });
   });
 }
