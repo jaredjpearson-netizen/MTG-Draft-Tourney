@@ -118,12 +118,14 @@ function computeStandings() {
         if (stats[m.p1]) { stats[m.p1].points += 3; stats[m.p1].wins += 1; stats[m.p1].byes += 1; }
         return;
       }
-      if (!m.result || !stats[m.p1] || !stats[m.p2]) return;
+      const p1Wins = m.p1Wins || 0;
+      const p2Wins = m.p2Wins || 0;
+      if (p1Wins + p2Wins === 0 || !stats[m.p1] || !stats[m.p2]) return;
       stats[m.p1].opponents.push(m.p2);
       stats[m.p2].opponents.push(m.p1);
-      if (m.result === "p1") { stats[m.p1].points += 3; stats[m.p1].wins += 1; stats[m.p2].losses += 1; }
-      else if (m.result === "p2") { stats[m.p2].points += 3; stats[m.p2].wins += 1; stats[m.p1].losses += 1; }
-      else if (m.result === "draw") { stats[m.p1].points += 1; stats[m.p2].points += 1; stats[m.p1].draws += 1; stats[m.p2].draws += 1; }
+      if (p1Wins > p2Wins) { stats[m.p1].points += 3; stats[m.p1].wins += 1; stats[m.p2].losses += 1; }
+      else if (p2Wins > p1Wins) { stats[m.p2].points += 3; stats[m.p2].wins += 1; stats[m.p1].losses += 1; }
+      else { stats[m.p1].points += 1; stats[m.p2].points += 1; stats[m.p1].draws += 1; stats[m.p2].draws += 1; }
     });
   });
   const list = Object.values(stats);
@@ -152,7 +154,7 @@ function generatePairings() {
     if (byeIdx === -1) byeIdx = pool.length - 1;
     const byeId = pool[byeIdx];
     pool.splice(byeIdx, 1);
-    matches.push({ p1: byeId, p2: null, bye: true, result: "p1" });
+    matches.push({ p1: byeId, p2: null, bye: true });
   }
   const unpaired = [...pool];
   while (unpaired.length > 0) {
@@ -160,7 +162,7 @@ function generatePairings() {
     let bIdx = unpaired.findIndex((b) => !playedBefore(rounds, a, b));
     if (bIdx === -1) bIdx = 0;
     const b = unpaired.splice(bIdx, 1)[0];
-    if (b !== undefined) matches.push({ p1: a, p2: b, bye: false, result: null });
+    if (b !== undefined) matches.push({ p1: a, p2: b, bye: false, p1Wins: 0, p2Wins: 0 });
   }
   return matches;
 }
@@ -189,17 +191,19 @@ function startTournament() {
   activeTab = "tournament"; render();
 }
 
-function setResult(roundKey, matchId, result) {
-  const path = "rounds/" + roundKey + "/matches/" + matchId + "/result";
-  const current = ((state.rounds || {})[roundKey]?.matches || {})[matchId]?.result;
-  eventRef.child(path).set(current === result ? null : result);
+function setGameWins(roundKey, matchId, side, delta) {
+  const field = side === "p1" ? "p1Wins" : "p2Wins";
+  const match = ((state.rounds || {})[roundKey]?.matches || {})[matchId] || {};
+  const next = Math.max(0, Math.min(2, (match[field] || 0) + delta));
+  eventRef.child("rounds/" + roundKey + "/matches/" + matchId + "/" + field).set(next);
 }
+function matchComplete(m) { return m.bye || (m.p1Wins || 0) + (m.p2Wins || 0) > 0; }
 
 function nextRound() {
   const rounds = roundsArray();
   if (rounds.length >= (state.totalRounds || 3)) return;
   const last = rounds[rounds.length - 1];
-  const complete = last.matches.every((m) => m.bye || m.result);
+  const complete = last.matches.every(matchComplete);
   if (!complete) return;
   const matches = generatePairings();
   const key = "r" + rounds.length;
@@ -210,17 +214,44 @@ function nextRound() {
 
 function resetTournament() { eventRef.update({ started: false, rounds: {} }); }
 
-function addBulkCards(text) {
+/* Scryfall is the standard free, keyless MTG card database/API.
+   We look up each card by name to grab its art; anything that isn't a
+   real card name (booster packs, "mystery prize", etc.) just won't
+   find a match and falls back to a placeholder tile. */
+async function fetchCardImage(name) {
+  try {
+    const res = await fetch("https://api.scryfall.com/cards/named?fuzzy=" + encodeURIComponent(name));
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (data.image_uris && data.image_uris.normal) return data.image_uris.normal;
+    if (data.card_faces && data.card_faces[0] && data.card_faces[0].image_uris) return data.card_faces[0].image_uris.normal;
+    return null;
+  } catch (e) { return null; }
+}
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function addBulkCards(text) {
   const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
   if (!lines.length) return;
+  const entries = lines.map((name) => ({ key: newKey("events/" + eventCode + "/prizePool"), name }));
   const updates = {};
-  lines.forEach((name) => { updates["prizePool/" + newKey("events/" + eventCode + "/prizePool")] = { name, addedAt: Date.now() }; });
+  entries.forEach((e2) => { updates["prizePool/" + e2.key] = { name: e2.name, addedAt: Date.now(), imageStatus: "loading" }; });
   eventRef.update(updates);
+  // Scryfall asks for polite spacing between requests, so we look these up
+  // one at a time in the background rather than all at once.
+  for (const e2 of entries) {
+    const img = await fetchCardImage(e2.name);
+    eventRef.child("prizePool/" + e2.key).update({ imageUrl: img, imageStatus: img ? "found" : "none" });
+    await sleep(100);
+  }
 }
-function addSingleCard(name) {
-  if (!name.trim()) return;
+async function addSingleCard(name) {
+  name = name.trim();
+  if (!name) return;
   const key = newKey("events/" + eventCode + "/prizePool");
-  eventRef.child("prizePool/" + key).set({ name: name.trim(), addedAt: Date.now() });
+  eventRef.child("prizePool/" + key).set({ name, addedAt: Date.now(), imageStatus: "loading" });
+  const img = await fetchCardImage(name);
+  eventRef.child("prizePool/" + key).update({ imageUrl: img, imageStatus: img ? "found" : "none" });
 }
 function removeCard(id) { if (!state.draftStarted) eventRef.child("prizePool/" + id).remove(); }
 function clearPool() { if (!state.draftStarted) eventRef.child("prizePool").remove(); }
@@ -272,6 +303,14 @@ function resetPrizeDraft() { eventRef.update({ draftStarted: false, claims: {}, 
 function el(html) { const d = document.createElement("div"); d.innerHTML = html.trim(); return d.firstChild; }
 function esc(s) { return (s || "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
 
+function cardVisualHTML(c, kind) {
+  // kind: "thumb" (pool list row), "tile" (draft grid), "mini" (results list)
+  const cls = kind === "tile" ? "card-tile-art" : kind === "mini" ? "result-thumb" : "card-thumb";
+  if (c.imageUrl) return `<div class="${cls}"><img src="${c.imageUrl}" alt="${esc(c.name)}" loading="lazy" /></div>`;
+  if (c.imageStatus === "loading") return `<div class="${cls} ph">⏳</div>`;
+  return `<div class="${cls} ph">📦</div>`;
+}
+
 function render() {
   // header
   const nameInput = document.getElementById("eventNameInput");
@@ -294,7 +333,7 @@ function renderPlayers() {
   const players = playersArray();
   document.getElementById("playersSub").textContent = state.started
     ? "Player list is locked once the tournament has started."
-    : "Add everyone who's drafting tonight.";
+    : "Add everyone who's drafting.";
   document.getElementById("addPlayerRow").style.display = state.started ? "none" : "flex";
 
   const list = document.getElementById("playersList");
@@ -327,11 +366,11 @@ function renderTournament() {
   const rounds = roundsArray();
   const totalRounds = state.totalRounds || 3;
   const last = rounds[rounds.length - 1];
-  const complete = last ? last.matches.every((m) => m.bye || m.result) : true;
+  const complete = last ? last.matches.every(matchComplete) : true;
   const done = rounds.length >= totalRounds && complete;
 
   document.getElementById("roundTitle").textContent = done ? "Final round" : `Round ${rounds.length} of ${totalRounds}`;
-  document.getElementById("roundSub").textContent = done ? "All rounds complete — head to Prize draft when you're ready." : "Tap a result to record it.";
+  document.getElementById("roundSub").textContent = done ? "All rounds complete — head to Prize draft when you're ready." : "Record games won by each player (best of 3).";
 
   const matchesList = document.getElementById("matchesList");
   matchesList.innerHTML = "";
@@ -344,13 +383,20 @@ function renderTournament() {
             <span style="font-size:12.5px;color:var(--ink-soft);font-style:italic;">bye — automatic win</span>
           </div>`));
       } else {
+        const p1w = m.p1Wins || 0, p2w = m.p2Wins || 0;
         matchesList.appendChild(el(`
           <div class="match-row">
             <span class="pname">${esc(nameOf(m.p1))}</span>
-            <div class="result-btns">
-              <button class="btn small ${m.result === "p1" ? "active" : ""}" data-result="${last.key}|${m.id}|p1">Win</button>
-              <button class="btn small wine ${m.result === "draw" ? "active" : ""}" data-result="${last.key}|${m.id}|draw">Draw</button>
-              <button class="btn small ${m.result === "p2" ? "active" : ""}" data-result="${last.key}|${m.id}|p2">Win</button>
+            <div class="games-stepper">
+              <button class="icon-btn" data-game="${last.key}|${m.id}|p1|-1" ${p1w <= 0 ? "disabled" : ""}>−</button>
+              <span class="games-count ${p1w > p2w ? "ahead" : ""}">${p1w}</span>
+              <button class="icon-btn" data-game="${last.key}|${m.id}|p1|1" ${p1w >= 2 ? "disabled" : ""}>+</button>
+            </div>
+            <span style="color:var(--ink-soft);font-size:13px;">games won</span>
+            <div class="games-stepper">
+              <button class="icon-btn" data-game="${last.key}|${m.id}|p2|-1" ${p2w <= 0 ? "disabled" : ""}>−</button>
+              <span class="games-count ${p2w > p1w ? "ahead" : ""}">${p2w}</span>
+              <button class="icon-btn" data-game="${last.key}|${m.id}|p2|1" ${p2w >= 2 ? "disabled" : ""}>+</button>
             </div>
             <span class="pname right">${esc(nameOf(m.p2))}</span>
           </div>`));
@@ -366,7 +412,7 @@ function renderTournament() {
   computeStandings().forEach((s, i) => {
     standingsList.appendChild(el(`
       <div class="standing-row ${i === 0 ? "lead" : ""}">
-        <span><span style="color:var(--ink-soft);margin-right:6px;">${i + 1}.</span>${esc(s.name)}</span>
+        <span style="color:var(--ink);"><span style="color:var(--ink-soft);margin-right:6px;">${i + 1}.</span>${esc(s.name)}</span>
         <span class="pts">${s.wins}-${s.losses}${s.draws ? "-" + s.draws : ""} · ${s.points} pts</span>
       </div>`));
   });
@@ -391,7 +437,10 @@ function renderPrizes() {
     pool.forEach((c) => {
       poolList.appendChild(el(`
         <div class="list-item">
-          ${esc(c.name)}
+          <span style="display:flex;align-items:center;gap:9px;">
+            ${cardVisualHTML(c, "thumb")}
+            ${esc(c.name)}
+          </span>
           <button class="x-btn" data-remove-card="${c.id}">✕</button>
         </div>`));
     });
@@ -442,7 +491,11 @@ function renderPrizes() {
   cardsGrid.style.display = draftComplete ? "none" : "grid";
   if (!draftComplete) {
     remaining.forEach((c) => {
-      cardsGrid.appendChild(el(`<button class="card-tile" data-claim="${c.id}">${esc(c.name)}</button>`));
+      cardsGrid.appendChild(el(`
+        <button class="card-tile" data-claim="${c.id}">
+          ${cardVisualHTML(c, "tile")}
+          <div class="card-tile-name">${esc(c.name)}</div>
+        </button>`));
     });
   }
 
@@ -454,7 +507,8 @@ function renderPrizes() {
     resultsGrid.appendChild(el(`
       <div class="result-card">
         <div class="pname">${esc(p.name)}</div>
-        ${cards.length === 0 ? `<p class="empty">No picks yet</p>` : `<ul>${cards.map((c) => `<li>${esc(c.name)}</li>`).join("")}</ul>`}
+        ${cards.length === 0 ? `<p class="empty">No picks yet</p>` : cards.map((c) => `
+          <div class="result-card-item">${cardVisualHTML(c, "mini")}<span>${esc(c.name)}</span></div>`).join("")}
       </div>`));
   });
 }
@@ -508,8 +562,8 @@ document.getElementById("app").addEventListener("click", (e) => {
   const rm = e.target.closest("[data-remove-player]");
   if (rm) return removePlayer(rm.dataset.removePlayer);
 
-  const res = e.target.closest("[data-result]");
-  if (res) { const [rk, mid, r] = res.dataset.result.split("|"); return setResult(rk, mid, r); }
+  const gm = e.target.closest("[data-game]");
+  if (gm) { const [rk, mid, side, delta] = gm.dataset.game.split("|"); return setGameWins(rk, mid, side, parseInt(delta)); }
 
   const rc = e.target.closest("[data-remove-card]");
   if (rc) return removeCard(rc.dataset.removeCard);
