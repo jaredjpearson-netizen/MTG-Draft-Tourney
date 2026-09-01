@@ -17,7 +17,8 @@
 // (everything else still works fine without them).
 
 const emailjsConfig = {
-  publicKey: "YOUR_PUBLIC_KEY",
-  serviceId: "YOUR_SERVICE_ID",
-  templateId: "YOUR_TEMPLATE_ID",
+  publicKey: "Mbtx59DrPenk6T6Od",
+  serviceId: "service_kfh50w8",
+  templateId: "template_dr2ichh",
 };
+
