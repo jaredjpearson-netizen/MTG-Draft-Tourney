@@ -30,6 +30,7 @@
   <div class="tabs">
     <div class="tab active" data-tab="players">👥 Players</div>
     <div class="tab" data-tab="tournament">⚔ Tournament</div>
+    <div class="tab" data-tab="results">📊 Results</div>
     <div class="tab" data-tab="prizes">🏆 Prize draft</div>
   </div>
 
@@ -79,6 +80,15 @@
             <div id="standingsList"></div>
           </div>
         </div>
+      </div>
+    </div>
+
+    <!-- RESULTS TAB -->
+    <div class="tab-page" id="page-results">
+      <h2 class="section-title">Full results</h2>
+      <p class="section-sub">Match points, then opponents' match-win %, game-win %, opponents' game-win % — in that order.</p>
+      <div id="resultsTableWrap" style="overflow-x:auto;">
+        <div class="results-table" id="resultsTable"></div>
       </div>
     </div>
 

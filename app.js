@@ -186,14 +186,23 @@ function generatePairings() {
     pool.splice(byeIdx, 1);
     matches.push({ p1: byeId, p2: null, bye: true });
   }
-  const unpaired = [...pool];
-  while (unpaired.length > 0) {
-    const a = unpaired.shift();
-    let bIdx = unpaired.findIndex((b) => !playedBefore(rounds, a, b));
-    if (bIdx === -1) bIdx = 0;
-    const b = unpaired.splice(bIdx, 1)[0];
-    if (b !== undefined) matches.push({ p1: a, p2: b, bye: false, p1Wins: 0, p2Wins: 0 });
-  }
+  // Fold (cross) pairing: split the score-ordered pool in half and pair
+  // top[i] against bottom[i] — e.g. with 10 players, 1v6, 2v7, 3v8, etc.
+  // This is the standard "opposite ends of the table" pairing method.
+  const half = pool.length / 2;
+  const top = pool.slice(0, half);
+  const bottom = pool.slice(half);
+  const usedBottom = new Set();
+  top.forEach((a, i) => {
+    let bIdx = i;
+    if (playedBefore(rounds, a, bottom[bIdx]) || usedBottom.has(bIdx)) {
+      let found = bottom.findIndex((b, j) => !usedBottom.has(j) && !playedBefore(rounds, a, b));
+      if (found === -1) found = bottom.findIndex((b, j) => !usedBottom.has(j));
+      bIdx = found;
+    }
+    usedBottom.add(bIdx);
+    if (bottom[bIdx] !== undefined) matches.push({ p1: a, p2: bottom[bIdx], bye: false, p1Wins: 0, p2Wins: 0 });
+  });
   return matches;
 }
 
@@ -330,6 +339,7 @@ function sendPickEmail(player) {
   console.log("[MTG draft] Sending turn-notification email to", player.email, "(" + player.name + ")");
   emailjs.send(emailjsConfig.serviceId, emailjsConfig.templateId, {
     to_email: player.email,
+    email: player.email,
     player_name: player.name,
     event_name: state.eventName || eventCode,
     event_link: window.location.href,
@@ -390,6 +400,7 @@ function render() {
 
   renderPlayers();
   renderTournament();
+  renderResults();
   renderPrizes();
 
   document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t.dataset.tab === activeTab));
@@ -484,6 +495,34 @@ function renderTournament() {
       <div class="standing-row ${i === 0 ? "lead" : ""}">
         <span style="color:var(--ink);"><span style="color:var(--ink-soft);margin-right:6px;">${i + 1}.</span>${esc(s.name)}</span>
         <span class="pts">${s.wins}-${s.losses}${s.draws ? "-" + s.draws : ""} · ${s.points} pts</span>
+      </div>`));
+  });
+}
+
+function pct(n) { return (n * 100).toFixed(1) + "%"; }
+
+function renderResults() {
+  const wrap = document.getElementById("resultsTable");
+  const standings = computeStandings();
+  wrap.innerHTML = "";
+  wrap.appendChild(el(`
+    <div class="results-table-row header">
+      <span>#</span><span>Player</span><span class="stat">Match pts</span>
+      <span class="stat">OMW%</span><span class="stat">GW%</span><span class="stat">OGW%</span>
+    </div>`));
+  if (standings.length === 0) {
+    wrap.appendChild(el(`<p style="color:var(--ink-soft);font-size:14px;">No players yet.</p>`));
+    return;
+  }
+  standings.forEach((s, i) => {
+    wrap.appendChild(el(`
+      <div class="results-table-row data ${i === 0 ? "lead" : ""}">
+        <span style="color:var(--ink-soft);">${i + 1}</span>
+        <span>${esc(s.name)}</span>
+        <span class="stat">${s.points}</span>
+        <span class="stat">${pct(s.omw)}</span>
+        <span class="stat">${pct(s.gameWinPct)}</span>
+        <span class="stat">${pct(s.ogw)}</span>
       </div>`));
   });
 }
