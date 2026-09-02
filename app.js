@@ -174,43 +174,89 @@ function hadBye(rounds, id) {
 }
 function generatePairings() {
   const rounds = roundsArray();
-  let pool;
-  if (rounds.length === 0) {
-    // Round 1: everyone's tied at 0 points, so standings order would just be
-    // random. Pair by seat order instead — the order players were added —
-    // so seat 1 faces seat 6, seat 2 faces seat 7, etc.
-    pool = playersArray().map((p) => p.id);
-  } else {
-    const standings = computeStandings().map((s) => ({ ...s, noise: Math.random() }));
-    standings.sort((a, b) => b.points - a.points || b.omw - a.omw || b.noise - a.noise);
-    pool = standings.map((s) => s.id);
-  }
+  if (rounds.length === 0) return generateRound1Pairings();
+  return generateSwissPairings(rounds);
+}
+
+// Round 1: everyone's tied at 0 points, so standings order is meaningless.
+// Pair by seat order instead — the order players were added — so seat 1
+// faces seat 6, seat 2 faces seat 7, etc. (opposite ends of the table).
+function generateRound1Pairings() {
+  const pool = playersArray().map((p) => p.id);
   const matches = [];
   if (pool.length % 2 === 1) {
-    let byeIdx = -1;
-    for (let i = pool.length - 1; i >= 0; i--) if (!hadBye(rounds, pool[i])) { byeIdx = i; break; }
-    if (byeIdx === -1) byeIdx = pool.length - 1;
-    const byeId = pool[byeIdx];
-    pool.splice(byeIdx, 1);
-    matches.push({ p1: byeId, p2: null, bye: true });
+    matches.push({ p1: pool.pop(), p2: null, bye: true });
   }
-  // Fold (cross) pairing: split the score-ordered pool in half and pair
-  // top[i] against bottom[i] — e.g. with 10 players, 1v6, 2v7, 3v8, etc.
-  // This is the standard "opposite ends of the table" pairing method.
   const half = pool.length / 2;
   const top = pool.slice(0, half);
   const bottom = pool.slice(half);
-  const usedBottom = new Set();
-  top.forEach((a, i) => {
-    let bIdx = i;
-    if (playedBefore(rounds, a, bottom[bIdx]) || usedBottom.has(bIdx)) {
-      let found = bottom.findIndex((b, j) => !usedBottom.has(j) && !playedBefore(rounds, a, b));
-      if (found === -1) found = bottom.findIndex((b, j) => !usedBottom.has(j));
-      bIdx = found;
-    }
-    usedBottom.add(bIdx);
-    if (bottom[bIdx] !== undefined) matches.push({ p1: a, p2: bottom[bIdx], bye: false, p1Wins: 0, p2Wins: 0 });
+  top.forEach((a, i) => { matches.push({ p1: a, p2: bottom[i], bye: false, p1Wins: 0, p2Wins: 0 }); });
+  return matches;
+}
+
+// Round 2+: standard Swiss bracket pairing. Priority 1 is that players with
+// matching records (score brackets) play each other — winners face other
+// winners, etc. Priority 2, applied within that, is dodging repeat
+// opponents. A player who can't be paired within their own bracket (odd
+// bracket size, or everyone left is a repeat) "floats" down into the next
+// bracket rather than forcing a same-bracket rematch.
+function generateSwissPairings(rounds) {
+  const standings = computeStandings(); // already sorted: points, then OMW%/GW%/OGW% tiebreakers
+  let ids = standings.map((s) => s.id);
+  const pointsOf = {};
+  standings.forEach((s) => { pointsOf[s.id] = s.points; });
+
+  const matches = [];
+  if (ids.length % 2 === 1) {
+    let byeIdx = -1;
+    for (let i = ids.length - 1; i >= 0; i--) if (!hadBye(rounds, ids[i])) { byeIdx = i; break; }
+    if (byeIdx === -1) byeIdx = ids.length - 1;
+    matches.push({ p1: ids[byeIdx], p2: null, bye: true });
+    ids.splice(byeIdx, 1);
+  }
+
+  // Group the (already score-sorted) remaining players into brackets of
+  // equal match points.
+  const brackets = [];
+  ids.forEach((id) => {
+    const last = brackets[brackets.length - 1];
+    if (last && pointsOf[last[0]] === pointsOf[id]) last.push(id);
+    else brackets.push([id]);
   });
+
+  let floaters = [];
+  brackets.forEach((bracket, bi) => {
+    const group = [...floaters, ...bracket];
+    floaters = [];
+    const used = new Set();
+    for (let i = 0; i < group.length; i++) {
+      const a = group[i];
+      if (used.has(a)) continue;
+      let partnerIdx = -1;
+      for (let j = i + 1; j < group.length; j++) {
+        if (!used.has(group[j]) && !playedBefore(rounds, a, group[j])) { partnerIdx = j; break; }
+      }
+      if (partnerIdx === -1) {
+        // No fresh opponent left in this bracket. On the last bracket we
+        // have no lower group to float into, so accept a repeat rather
+        // than leave someone unpaired; otherwise float down.
+        const isLastBracket = bi === brackets.length - 1;
+        if (isLastBracket) {
+          for (let j = i + 1; j < group.length; j++) if (!used.has(group[j])) { partnerIdx = j; break; }
+        }
+      }
+      if (partnerIdx === -1) { floaters.push(a); used.add(a); continue; }
+      const b = group[partnerIdx];
+      used.add(a); used.add(b);
+      matches.push({ p1: a, p2: b, bye: false, p1Wins: 0, p2Wins: 0 });
+    }
+  });
+
+  // Shouldn't normally happen (total player count is even after the bye),
+  // but if floaters are left over with nowhere lower to go, pair them off.
+  while (floaters.length > 1) {
+    matches.push({ p1: floaters.shift(), p2: floaters.shift(), bye: false, p1Wins: 0, p2Wins: 0 });
+  }
   return matches;
 }
 
@@ -362,7 +408,8 @@ function removeCard(id) { if (!state.draftStarted) eventRef.child("prizePool/" +
 function clearPool() { if (!state.draftStarted) eventRef.child("prizePool").remove(); }
 
 function computeBaseOrder() {
-  // Winner picks first, in snake order — no longer configurable.
+  // Draft order follows the tournament ranking (winner first), looping back
+  // to the top of the ranking each time it reaches the bottom — not snaked.
   return computeStandings().map((s) => s.id);
 }
 
@@ -375,13 +422,10 @@ function beginDraft() {
 
 function currentPickerId() {
   const order = state.pickOrderSnapshot || computeBaseOrder();
-  const claimsCount = Object.keys(state.claims || {}).length;
   const n = order.length;
   if (n === 0) return null;
-  const round = Math.floor(claimsCount / n);
-  let pos = claimsCount % n;
-  if (round % 2 === 1) pos = n - 1 - pos;
-  return order[pos];
+  const claimsCount = Object.keys(state.claims || {}).length;
+  return order[claimsCount % n];
 }
 
 function claimCard(cardId) {

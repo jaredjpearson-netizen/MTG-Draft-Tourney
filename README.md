@@ -144,7 +144,9 @@ hosted.)
   stay up on their own, so the link works anytime, from anywhere.
 - Standings tiebreakers follow the usual tournament convention: match points,
   then opponents' match-win %, then game-win %, then opponents' game-win %.
-- The prize draft always runs winner-picks-first, in snake order.
+- The prize draft always runs winner-first, following the tournament ranking
+  top to bottom and looping back to the top each time it reaches the last
+  place — not a snake order.
 - Player email addresses are optional — only used to send the "it's your
   turn" notification if you've set up EmailJS. Anyone at the table can still
   see whose turn it is directly on screen either way.
