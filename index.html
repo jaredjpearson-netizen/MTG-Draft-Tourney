@@ -24,6 +24,10 @@
     <span style="font-size:20px;">✦</span>
     <input id="eventNameInput" type="text" />
     <span id="eventMeta"></span>
+    <span id="paymentInfoBadge" class="hover-badge" style="display:none;">
+      💰 Payment info
+      <div class="hover-panel" id="paymentInfoPanel"></div>
+    </span>
     <span id="codeBadge" title="Click to change event"></span>
   </header>
 
@@ -41,8 +45,8 @@
       <h2 class="section-title">Who's at the table</h2>
       <p class="section-sub" id="playersSub">Add everyone who's drafting. Email is required so we can send them updates.</p>
       <div class="field-row" id="addPlayerRow">
-        <input type="text" id="newPlayerInput" placeholder="Player name" />
-        <input type="email" id="newPlayerEmailInput" placeholder="Email address" />
+        <input type="text" id="newPlayerInput" placeholder="Player name" style="flex:1;" />
+        <input type="email" id="newPlayerEmailInput" placeholder="Email address" style="flex:3;" />
         <button class="btn" id="addPlayerBtn">+ Add</button>
       </div>
       <div class="list-grid" id="playersList"></div>
@@ -59,15 +63,27 @@
           <span id="roundsCount" style="width:24px;text-align:center;font-weight:700;color:var(--ink);">3</span>
           <button class="icon-btn" id="roundsPlus">+</button>
         </div>
-        <div class="field-row">
-          <input type="text" id="organizerNameInput" placeholder="Organizer name (shown in the welcome email)" />
+        <div class="field-block">
+          <label>Organizer name</label>
+          <input type="text" id="organizerNameInput" placeholder="e.g. Alex" />
         </div>
-        <div class="field-row">
-          <input type="text" id="tournamentCostInput" placeholder="Entry cost per player (e.g. $5)" />
-          <input type="email" id="paymentEmailInput" placeholder="Payment email (e.g. Venmo/PayPal)" />
+        <div class="field-block">
+          <label>Organizer contact email</label>
+          <input type="email" id="organizerEmailInput" placeholder="you@example.com" />
+        </div>
+        <div class="field-block">
+          <label>Entry cost per player</label>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span style="color:var(--ink);font-weight:700;font-size:15px;">$</span>
+            <input type="text" id="tournamentCostInput" placeholder="5" style="max-width:120px;" />
+          </div>
+        </div>
+        <div class="field-block">
+          <label>Payment info (e.g. Venmo/PayPal email)</label>
+          <input type="email" id="paymentEmailInput" placeholder="you@example.com" />
         </div>
         <p style="font-size:12.5px;color:var(--ink-soft);margin:-6px 0 16px;">
-          When you start the tournament, everyone with an email on file gets a welcome email with the entry cost and a link back here.
+          Starting the tournament sends a welcome email to all players.
         </p>
         <button class="btn" id="startTournamentBtn">⚔ Start tournament</button>
         <p id="needPlayersMsg" style="color:var(--ink-soft);font-size:13px;margin-top:10px;display:none;">Add at least 2 players first.</p>
@@ -78,7 +94,6 @@
           <div class="tourney-matches">
             <h2 class="section-title" id="roundTitle">Round 1</h2>
             <p class="section-sub" id="roundSub">Record games won by each player (best of 3).</p>
-            <p id="entryInfoLine" style="font-size:12.5px;color:var(--ink-soft);margin:-10px 0 14px;display:none;"></p>
             <div id="matchesList"></div>
             <div style="display:flex;gap:10px;margin-top:6px;align-items:center;">
               <button class="btn" id="nextRoundBtn">Generate next round</button>

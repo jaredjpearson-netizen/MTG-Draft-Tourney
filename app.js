@@ -237,17 +237,19 @@ function startTournament() {
   const roundObj = {};
   matches.forEach((m) => { roundObj[newKey("events/" + eventCode + "/rounds/r0/matches")] = m; });
   const organizerName = document.getElementById("organizerNameInput").value.trim() || "The Organizer";
-  const tournamentCost = document.getElementById("tournamentCostInput").value.trim();
+  const organizerEmail = document.getElementById("organizerEmailInput").value.trim();
+  const costAmount = document.getElementById("tournamentCostInput").value.trim();
+  const tournamentCost = costAmount ? (costAmount.startsWith("$") ? costAmount : "$" + costAmount) : "";
   const paymentEmail = document.getElementById("paymentEmailInput").value.trim();
   eventRef.update({
     started: true, rounds: { r0: { matches: roundObj } },
-    organizerName, tournamentCost, paymentEmail,
+    organizerName, organizerEmail, tournamentCost, paymentEmail,
   });
-  sendTournamentStartEmails(players, organizerName, tournamentCost);
+  sendTournamentStartEmails(players, organizerName, tournamentCost, paymentEmail);
   activeTab = "tournament"; render();
 }
 
-async function sendTournamentStartEmails(players, organizerName, tournamentCost) {
+async function sendTournamentStartEmails(players, organizerName, tournamentCost, paymentEmail) {
   if (!window.emailjs || !tournamentStartEmailConfig || tournamentStartEmailConfig.publicKey === "YOUR_PUBLIC_KEY") {
     console.log("[MTG draft] Tournament-start email not configured — skipping welcome emails.");
     return;
@@ -263,6 +265,7 @@ async function sendTournamentStartEmails(players, organizerName, tournamentCost)
         organiser: organizerName,
         event_name: eventName,
         tournament_cost: tournamentCost || "0",
+        payment_email: paymentEmail || "",
         event_link: link,
       }, tournamentStartEmailConfig.publicKey);
       console.log("[MTG draft] Welcome email sent to", p.email, res.status);
@@ -459,6 +462,19 @@ function render() {
     (state.started ? ` · round ${roundKeys().length}/${state.totalRounds || 3}` : "");
   document.getElementById("codeBadge").textContent = "Event code: " + eventCode + " (tap to change)";
 
+  const payBadge = document.getElementById("paymentInfoBadge");
+  if (state.started) {
+    payBadge.style.display = "inline-block";
+    document.getElementById("paymentInfoPanel").innerHTML = `
+      <div class="row"><b>Organizer</b>${esc(state.organizerName || "—")}</div>
+      <div class="row"><b>Contact email</b>${esc(state.organizerEmail || "—")}</div>
+      <div class="row"><b>Entry cost</b>${esc(state.tournamentCost || "—")}</div>
+      <div class="row"><b>Payment info</b>${esc(state.paymentEmail || "—")}</div>
+    `;
+  } else {
+    payBadge.style.display = "none";
+  }
+
   renderPlayers();
   renderTournament();
   renderResults();
@@ -501,24 +517,18 @@ function renderTournament() {
   document.getElementById("startTournamentBtn").disabled = players.length < 2;
 
   const orgInput = document.getElementById("organizerNameInput");
+  const orgEmailInput = document.getElementById("organizerEmailInput");
   const costInput = document.getElementById("tournamentCostInput");
   const payInput = document.getElementById("paymentEmailInput");
   if (document.activeElement !== orgInput) orgInput.value = state.organizerName || "";
-  if (document.activeElement !== costInput) costInput.value = state.tournamentCost || "";
+  if (document.activeElement !== orgEmailInput) orgEmailInput.value = state.organizerEmail || "";
+  if (document.activeElement !== costInput) costInput.value = (state.tournamentCost || "").replace(/^\$/, "");
   if (document.activeElement !== payInput) payInput.value = state.paymentEmail || "";
 
   const running = !!state.started;
   document.getElementById("setupView").style.display = running ? "none" : "block";
   document.getElementById("runningView").style.display = running ? "block" : "none";
   if (!running) return;
-
-  const entryLine = document.getElementById("entryInfoLine");
-  if (state.tournamentCost) {
-    entryLine.style.display = "block";
-    entryLine.textContent = "Entry: " + state.tournamentCost + (state.paymentEmail ? " · pay " + state.paymentEmail : "");
-  } else {
-    entryLine.style.display = "none";
-  }
 
   const rounds = roundsArray();
   const totalRounds = state.totalRounds || 3;
@@ -716,7 +726,11 @@ document.getElementById("roundsMinus").addEventListener("click", () => setTotalR
 document.getElementById("roundsPlus").addEventListener("click", () => setTotalRounds((state.totalRounds || 3) + 1));
 document.getElementById("startTournamentBtn").addEventListener("click", startTournament);
 document.getElementById("organizerNameInput").addEventListener("change", (e) => eventRef.child("organizerName").set(e.target.value.trim()));
-document.getElementById("tournamentCostInput").addEventListener("change", (e) => eventRef.child("tournamentCost").set(e.target.value.trim()));
+document.getElementById("organizerEmailInput").addEventListener("change", (e) => eventRef.child("organizerEmail").set(e.target.value.trim()));
+document.getElementById("tournamentCostInput").addEventListener("change", (e) => {
+  const v = e.target.value.trim();
+  eventRef.child("tournamentCost").set(v ? (v.startsWith("$") ? v : "$" + v) : "");
+});
 document.getElementById("paymentEmailInput").addEventListener("change", (e) => eventRef.child("paymentEmail").set(e.target.value.trim()));
 document.getElementById("nextRoundBtn").addEventListener("click", nextRound);
 document.getElementById("resetTournamentBtn").addEventListener("click", () => {
