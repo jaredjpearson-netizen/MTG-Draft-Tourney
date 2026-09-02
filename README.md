@@ -97,7 +97,21 @@ If you skip this step, the app works exactly the same — it just won't send
 emails (everything happens live in the browser regardless, so this is purely
 an extra nudge for people who've stepped away from the screen).
 
-## 5. Put the files on GitHub Pages (~5 min)
+## 5. Set up the "tournament started" welcome email (optional)
+
+Separately from the turn-notification emails above, the app can also send a
+one-time "the tournament has started" email to every registered player,
+including the entry cost and a link back to the event — sent automatically
+the moment the organizer clicks **Start tournament**.
+
+This uses its own EmailJS template, configured in `emailjs-start-config.js`.
+Set it up the same way as step 4 (new template, in the EmailJS dashboard),
+using these variables: `{{to_email}}`, `{{organiser}}`, `{{event_name}}`,
+`{{tournament_cost}}`, `{{event_link}}`. As with the template in step 4,
+double-check the template's **Settings tab → To Email** field is set to
+`{{to_email}}` — this is the most common thing to trip up on.
+
+## 6. Put the files on GitHub Pages (~5 min)
 
 1. Create a new **public** repository on [github.com](https://github.com) (e.g.
    `mtg-draft-night`).
@@ -114,7 +128,7 @@ an extra nudge for people who've stepped away from the screen).
 folder instead of using GitHub — either is fine, this app doesn't care how it's
 hosted.)
 
-## 6. Run your draft night
+## 7. Run your draft night
 
 1. Open your GitHub Pages URL. You'll be asked for an event code — leave it blank
    and click **Join / create event** to generate a random one (or type your own,
@@ -134,6 +148,13 @@ hosted.)
 - Player email addresses are optional — only used to send the "it's your
   turn" notification if you've set up EmailJS. Anyone at the table can still
   see whose turn it is directly on screen either way.
+- Every player now needs an email address to be added — it's required, not
+  optional, since the app relies on it for both notification emails.
+- Hover (or tap-and-hold on mobile) over any card's art anywhere in the app
+  to see a full-size preview.
+- If a big bulk card-add leaves a few cards without art (Scryfall
+  rate-limits large bursts), a "Retry missing card images" button appears
+  in the Prize pool setup to re-fetch just those.
 - Data isn't automatically deleted — old events just sit in your database (free
   tier is generous, this won't cost anything for normal use). You can delete old
   event nodes manually in the Firebase console under **Realtime Database → Data**

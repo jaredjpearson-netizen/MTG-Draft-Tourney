@@ -220,11 +220,11 @@ function generatePairings() {
 function setEventName(name) { eventRef.child("eventName").set(name); }
 
 function addPlayer(name, email) {
-  if (!name.trim() || state.started) return;
+  name = (name || "").trim();
+  email = (email || "").trim();
+  if (!name || !email || state.started) return;
   const key = newKey("events/" + eventCode + "/players");
-  const data = { name: name.trim(), addedAt: Date.now() };
-  if (email && email.trim()) data.email = email.trim();
-  eventRef.child("players/" + key).set(data);
+  eventRef.child("players/" + key).set({ name, email, addedAt: Date.now() });
 }
 function removePlayer(id) { if (!state.started) eventRef.child("players/" + id).remove(); }
 
@@ -236,8 +236,41 @@ function startTournament() {
   const matches = generatePairings();
   const roundObj = {};
   matches.forEach((m) => { roundObj[newKey("events/" + eventCode + "/rounds/r0/matches")] = m; });
-  eventRef.update({ started: true, rounds: { r0: { matches: roundObj } } });
+  const organizerName = document.getElementById("organizerNameInput").value.trim() || "The Organizer";
+  const tournamentCost = document.getElementById("tournamentCostInput").value.trim();
+  const paymentEmail = document.getElementById("paymentEmailInput").value.trim();
+  eventRef.update({
+    started: true, rounds: { r0: { matches: roundObj } },
+    organizerName, tournamentCost, paymentEmail,
+  });
+  sendTournamentStartEmails(players, organizerName, tournamentCost);
   activeTab = "tournament"; render();
+}
+
+async function sendTournamentStartEmails(players, organizerName, tournamentCost) {
+  if (!window.emailjs || !tournamentStartEmailConfig || tournamentStartEmailConfig.publicKey === "YOUR_PUBLIC_KEY") {
+    console.log("[MTG draft] Tournament-start email not configured — skipping welcome emails.");
+    return;
+  }
+  const eventName = (document.getElementById("eventNameInput").value || eventCode).trim();
+  const link = window.location.href;
+  const recipients = players.filter((p) => p.email);
+  for (const p of recipients) {
+    try {
+      const res = await emailjs.send(tournamentStartEmailConfig.serviceId, tournamentStartEmailConfig.templateId, {
+        to_email: p.email,
+        email: p.email,
+        organiser: organizerName,
+        event_name: eventName,
+        tournament_cost: tournamentCost || "0",
+        event_link: link,
+      }, tournamentStartEmailConfig.publicKey);
+      console.log("[MTG draft] Welcome email sent to", p.email, res.status);
+    } catch (err) {
+      console.error("[MTG draft] Welcome email FAILED for", p.email, err);
+    }
+    await sleep(150);
+  }
 }
 
 function setGameWins(roundKey, matchId, side, delta) {
@@ -266,16 +299,26 @@ function resetTournament() { eventRef.update({ started: false, rounds: {} }); }
 /* Scryfall is the standard free, keyless MTG card database/API.
    We look up each card by name to grab its art; anything that isn't a
    real card name (booster packs, "mystery prize", etc.) just won't
-   find a match and falls back to a placeholder tile. */
-async function fetchCardImage(name) {
+   find a match and falls back to a placeholder tile. Scryfall rate-limits
+   bursts of requests (HTTP 429), so on a large bulk-add we back off and
+   retry a couple of times before giving up on a card. */
+async function fetchCardImage(name, attempt) {
+  attempt = attempt || 0;
   try {
     const res = await fetch("https://api.scryfall.com/cards/named?fuzzy=" + encodeURIComponent(name));
+    if (res.status === 429 && attempt < 3) {
+      await sleep(600 * (attempt + 1));
+      return fetchCardImage(name, attempt + 1);
+    }
     if (!res.ok) return null;
     const data = await res.json();
     if (data.image_uris && data.image_uris.normal) return data.image_uris.normal;
     if (data.card_faces && data.card_faces[0] && data.card_faces[0].image_uris) return data.card_faces[0].image_uris.normal;
     return null;
-  } catch (e) { return null; }
+  } catch (e) {
+    if (attempt < 2) { await sleep(600); return fetchCardImage(name, attempt + 1); }
+    return null;
+  }
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -291,7 +334,7 @@ async function addBulkCards(text) {
   for (const e2 of entries) {
     const img = await fetchCardImage(e2.name);
     eventRef.child("prizePool/" + e2.key).update({ imageUrl: img, imageStatus: img ? "found" : "none" });
-    await sleep(100);
+    await sleep(180);
   }
 }
 async function addSingleCard(name) {
@@ -301,6 +344,16 @@ async function addSingleCard(name) {
   eventRef.child("prizePool/" + key).set({ name, addedAt: Date.now(), imageStatus: "loading" });
   const img = await fetchCardImage(name);
   eventRef.child("prizePool/" + key).update({ imageUrl: img, imageStatus: img ? "found" : "none" });
+}
+async function retryMissingImages() {
+  const pool = state.prizePool || {};
+  const missing = Object.entries(pool).filter(([, c]) => c.imageStatus !== "found");
+  for (const [id, c] of missing) {
+    eventRef.child("prizePool/" + id + "/imageStatus").set("loading");
+    const img = await fetchCardImage(c.name);
+    eventRef.child("prizePool/" + id).update({ imageUrl: img, imageStatus: img ? "found" : "none" });
+    await sleep(180);
+  }
 }
 function removeCard(id) { if (!state.draftStarted) eventRef.child("prizePool/" + id).remove(); }
 function clearPool() { if (!state.draftStarted) eventRef.child("prizePool").remove(); }
@@ -391,7 +444,7 @@ function esc(s) { return (s || "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "
 function cardVisualHTML(c, kind) {
   // kind: "thumb" (pool list row), "tile" (draft grid), "mini" (results list)
   const cls = kind === "tile" ? "card-tile-art" : kind === "mini" ? "result-thumb" : "card-thumb";
-  if (c.imageUrl) return `<div class="${cls}"><img src="${c.imageUrl}" alt="${esc(c.name)}" loading="lazy" /></div>`;
+  if (c.imageUrl) return `<div class="${cls}" data-preview="${esc(c.imageUrl)}"><img src="${c.imageUrl}" alt="${esc(c.name)}" loading="lazy" /></div>`;
   if (c.imageStatus === "loading") return `<div class="${cls} ph">⏳</div>`;
   return `<div class="${cls} ph">📦</div>`;
 }
@@ -447,10 +500,25 @@ function renderTournament() {
   document.getElementById("needPlayersMsg").style.display = players.length < 2 ? "block" : "none";
   document.getElementById("startTournamentBtn").disabled = players.length < 2;
 
+  const orgInput = document.getElementById("organizerNameInput");
+  const costInput = document.getElementById("tournamentCostInput");
+  const payInput = document.getElementById("paymentEmailInput");
+  if (document.activeElement !== orgInput) orgInput.value = state.organizerName || "";
+  if (document.activeElement !== costInput) costInput.value = state.tournamentCost || "";
+  if (document.activeElement !== payInput) payInput.value = state.paymentEmail || "";
+
   const running = !!state.started;
   document.getElementById("setupView").style.display = running ? "none" : "block";
   document.getElementById("runningView").style.display = running ? "block" : "none";
   if (!running) return;
+
+  const entryLine = document.getElementById("entryInfoLine");
+  if (state.tournamentCost) {
+    entryLine.style.display = "block";
+    entryLine.textContent = "Entry: " + state.tournamentCost + (state.paymentEmail ? " · pay " + state.paymentEmail : "");
+  } else {
+    entryLine.style.display = "none";
+  }
 
   const rounds = roundsArray();
   const totalRounds = state.totalRounds || 3;
@@ -562,6 +630,11 @@ function renderPrizes() {
         </div>`));
     });
 
+    const missingCount = pool.filter((c) => c.imageStatus !== "found").length;
+    const retryBtn = document.getElementById("retryImagesBtn");
+    retryBtn.style.display = missingCount > 0 ? "inline-block" : "none";
+    retryBtn.textContent = "🔄 Retry missing card images (" + missingCount + ")";
+
     document.getElementById("beginDraftBtn").disabled = pool.length === 0 || players.length === 0;
     return;
   }
@@ -620,7 +693,17 @@ document.getElementById("eventNameInput").addEventListener("change", (e) => setE
 document.getElementById("addPlayerBtn").addEventListener("click", () => {
   const input = document.getElementById("newPlayerInput");
   const emailInput = document.getElementById("newPlayerEmailInput");
-  addPlayer(input.value, emailInput.value); input.value = ""; emailInput.value = "";
+  const name = input.value.trim();
+  const email = emailInput.value.trim();
+  if (!name || !email) {
+    alert("Please enter both a player name and an email address — email is required for every player.");
+    return;
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    alert("That doesn't look like a valid email address — please double check it.");
+    return;
+  }
+  addPlayer(name, email); input.value = ""; emailInput.value = "";
 });
 document.getElementById("newPlayerInput").addEventListener("keydown", (e) => {
   if (e.key === "Enter") document.getElementById("addPlayerBtn").click();
@@ -632,6 +715,9 @@ document.getElementById("newPlayerEmailInput").addEventListener("keydown", (e) =
 document.getElementById("roundsMinus").addEventListener("click", () => setTotalRounds((state.totalRounds || 3) - 1));
 document.getElementById("roundsPlus").addEventListener("click", () => setTotalRounds((state.totalRounds || 3) + 1));
 document.getElementById("startTournamentBtn").addEventListener("click", startTournament);
+document.getElementById("organizerNameInput").addEventListener("change", (e) => eventRef.child("organizerName").set(e.target.value.trim()));
+document.getElementById("tournamentCostInput").addEventListener("change", (e) => eventRef.child("tournamentCost").set(e.target.value.trim()));
+document.getElementById("paymentEmailInput").addEventListener("change", (e) => eventRef.child("paymentEmail").set(e.target.value.trim()));
 document.getElementById("nextRoundBtn").addEventListener("click", nextRound);
 document.getElementById("resetTournamentBtn").addEventListener("click", () => {
   if (confirm("Reset the tournament? This clears all rounds and results.")) resetTournament();
@@ -641,6 +727,7 @@ document.getElementById("addBulkBtn").addEventListener("click", () => {
   const ta = document.getElementById("bulkCardsInput");
   addBulkCards(ta.value); ta.value = "";
 });
+document.getElementById("retryImagesBtn").addEventListener("click", () => retryMissingImages());
 document.getElementById("addSingleBtn").addEventListener("click", () => {
   const input = document.getElementById("singleCardInput");
   addSingleCard(input.value); input.value = "";
@@ -674,4 +761,37 @@ document.getElementById("app").addEventListener("click", (e) => {
 
   const cc = e.target.closest("[data-claim]");
   if (cc) return claimCard(cc.dataset.claim);
+});
+
+/* ---------------------------------------------------------
+   Hover-to-preview: full-size card art on rollover
+--------------------------------------------------------- */
+const cardPreview = document.getElementById("cardPreview");
+const cardPreviewImg = document.getElementById("cardPreviewImg");
+
+function positionCardPreview(e) {
+  const pad = 18;
+  let x = e.clientX + pad;
+  let y = e.clientY + pad;
+  if (x + 280 > window.innerWidth) x = e.clientX - 280 - pad;
+  if (y + 380 > window.innerHeight) y = Math.max(10, window.innerHeight - 390);
+  cardPreview.style.left = x + "px";
+  cardPreview.style.top = y + "px";
+}
+
+document.addEventListener("mouseover", (e) => {
+  const t = e.target.closest("[data-preview]");
+  if (!t) return;
+  cardPreviewImg.src = t.dataset.preview;
+  positionCardPreview(e);
+  cardPreview.style.display = "block";
+});
+document.addEventListener("mousemove", (e) => {
+  if (cardPreview.style.display === "block") positionCardPreview(e);
+});
+document.addEventListener("mouseout", (e) => {
+  const t = e.target.closest("[data-preview]");
+  if (!t) return;
+  if (t.contains(e.relatedTarget)) return;
+  cardPreview.style.display = "none";
 });

@@ -204,6 +204,15 @@ input::placeholder, textarea::placeholder { color: #9c917a; }
 .order-row { display: flex; align-items: center; justify-content: space-between; background: var(--cream); border: 1px solid var(--parchment-line); border-radius: 8px; padding: 7px 11px; font-size: 13.5px; margin-bottom: 6px; }
 .order-row .btns { display: flex; gap: 4px; }
 
+#cardPreview {
+  position: fixed; display: none; z-index: 9999; pointer-events: none;
+}
+#cardPreview img {
+  width: 260px; border-radius: 12px; box-shadow: 0 16px 40px rgba(0,0,0,.5);
+  border: 2px solid var(--gold); display: block;
+}
+[data-preview] { cursor: pointer; }
+
 @media (max-width: 600px) {
   #eventNameInput { font-size: 21px; }
   .panel { padding: 16px; }
