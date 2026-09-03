@@ -669,13 +669,26 @@ function displayCost(v) {
 }
 
 function renderResults() {
+  const titleEl = document.getElementById("resultsPageTitle");
+  const rounds = roundsArray();
+  const totalRounds = state.totalRounds || 3;
+  const last = rounds[rounds.length - 1];
+  const roundComplete = last ? last.matches.every(matchComplete) : true;
+  const inProgress = state.started && !(rounds.length >= totalRounds && roundComplete);
+  titleEl.textContent = "Tournament Results" + (inProgress ? " (In progress)" : "");
+
   const wrap = document.getElementById("resultsTable");
   const standings = computeStandings();
   wrap.innerHTML = "";
   wrap.appendChild(el(`
     <div class="results-table-row header">
-      <span>#</span><span>Player</span><span class="stat">Match pts</span>
-      <span class="stat">OMW%</span><span class="stat">GW%</span><span class="stat">OGW%</span>
+      <span title="Rank">#</span>
+      <span title="Player">Player</span>
+      <span class="stat" title="Match Points">Match pts</span>
+      <span class="stat" title="Match Win %">MW%</span>
+      <span class="stat" title="Opponents' Match Win %">OMW%</span>
+      <span class="stat" title="Game Win %">GW%</span>
+      <span class="stat" title="Opponents' Game Win %">OGW%</span>
     </div>`));
   if (standings.length === 0) {
     wrap.appendChild(el(`<p style="color:var(--ink-soft);font-size:14px;">No players yet.</p>`));
@@ -687,6 +700,7 @@ function renderResults() {
         <span style="color:var(--ink-soft);">${i + 1}</span>
         <span>${esc(s.name)}</span>
         <span class="stat">${s.points}</span>
+        <span class="stat">${pct(s.matchWinPct)}</span>
         <span class="stat">${pct(s.omw)}</span>
         <span class="stat">${pct(s.gameWinPct)}</span>
         <span class="stat">${pct(s.ogw)}</span>
