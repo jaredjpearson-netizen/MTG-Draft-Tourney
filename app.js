@@ -28,6 +28,27 @@ function randomCode() {
   return s;
 }
 
+function computeDefaultTab() {
+  const started = !!state.started;
+  const draftStarted = !!state.draftStarted;
+  const poolCount = Object.keys(state.prizePool || {}).length;
+  const claimsCount = Object.keys(state.claims || {}).length;
+
+  if (draftStarted) {
+    const draftComplete = poolCount > 0 && claimsCount >= poolCount;
+    return draftComplete ? "results" : "prizes";
+  }
+  if (started) {
+    const rounds = roundsArray();
+    const totalRounds = state.totalRounds || 3;
+    const last = rounds[rounds.length - 1];
+    const roundComplete = last ? last.matches.every(matchComplete) : true;
+    const tournamentDone = rounds.length >= totalRounds && roundComplete;
+    return tournamentDone ? "results" : "tournament";
+  }
+  return "players";
+}
+
 function openEvent(code) {
   eventCode = code.trim().toUpperCase();
   if (!eventCode) eventCode = randomCode();
@@ -49,8 +70,10 @@ function openEvent(code) {
     }
   });
 
+  let initialTabSet = false;
   eventRef.on("value", (snap) => {
     state = snap.val() || {};
+    if (!initialTabSet) { activeTab = computeDefaultTab(); initialTabSet = true; }
     joinScreen.style.display = "none";
     appRoot.style.display = "block";
     render();
