@@ -1,4 +1,3 @@
-// Paste the config object from your Firebase project here.
 // Firebase console → Project settings (gear icon) → General tab →
 // "Your apps" → Web app → SDK setup and configuration → Config.
 //
@@ -13,5 +12,5 @@ const firebaseConfig = {
   projectId: "mtg-draft-tourneys",
   storageBucket: "mtg-draft-tourneys.firebasestorage.app",
   messagingSenderId: "323254035303",
-  appId: "1:323254035303:web:b30d83834ed7432bae45c2"
+  appId: "1:323254035303:web:b30d83834ed7432bae45c2",
 };

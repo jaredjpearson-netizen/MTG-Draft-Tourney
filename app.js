@@ -346,11 +346,16 @@ function nextRound() {
 function resetTournament() { eventRef.update({ started: false, rounds: {} }); }
 
 /* Scryfall is the standard free, keyless MTG card database/API.
-   We look up each card by name to grab its art; anything that isn't a
-   real card name (booster packs, "mystery prize", etc.) just won't
-   find a match and falls back to a placeholder tile. Scryfall rate-limits
-   bursts of requests (HTTP 429), so on a large bulk-add we back off and
-   retry a couple of times before giving up on a card. */
+   We look up each card by name to grab its art. Two different things can
+   happen when there's no image:
+     - Scryfall returns 404 "no card found" — this is a strong signal the
+       entry just isn't a real card name (a booster pack, a box topper, a
+       "mystery prize" line, etc). That's expected and permanent, so we
+       don't flag it as a problem or offer to retry it.
+     - Any other failure (network hiccup, rate-limit exhausted, etc.) is
+       transient — we retry a couple of times, and if it still fails we
+       flag it as "missing" so the organizer can retry it manually later.
+   Returns { url, notACard }. */
 async function fetchCardImage(name, attempt) {
   attempt = attempt || 0;
   try {
@@ -359,17 +364,20 @@ async function fetchCardImage(name, attempt) {
       await sleep(600 * (attempt + 1));
       return fetchCardImage(name, attempt + 1);
     }
-    if (!res.ok) return null;
+    if (res.status === 404) return { url: null, notACard: true };
+    if (!res.ok) return { url: null, notACard: false };
     const data = await res.json();
-    if (data.image_uris && data.image_uris.normal) return data.image_uris.normal;
-    if (data.card_faces && data.card_faces[0] && data.card_faces[0].image_uris) return data.card_faces[0].image_uris.normal;
-    return null;
+    let url = null;
+    if (data.image_uris && data.image_uris.normal) url = data.image_uris.normal;
+    else if (data.card_faces && data.card_faces[0] && data.card_faces[0].image_uris) url = data.card_faces[0].image_uris.normal;
+    return { url, notACard: !url };
   } catch (e) {
     if (attempt < 2) { await sleep(600); return fetchCardImage(name, attempt + 1); }
-    return null;
+    return { url: null, notACard: false };
   }
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+function statusFor(result) { return result.url ? "found" : result.notACard ? "not_a_card" : "none"; }
 
 async function addBulkCards(text) {
   const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
@@ -381,8 +389,8 @@ async function addBulkCards(text) {
   // Scryfall asks for polite spacing between requests, so we look these up
   // one at a time in the background rather than all at once.
   for (const e2 of entries) {
-    const img = await fetchCardImage(e2.name);
-    eventRef.child("prizePool/" + e2.key).update({ imageUrl: img, imageStatus: img ? "found" : "none" });
+    const result = await fetchCardImage(e2.name);
+    eventRef.child("prizePool/" + e2.key).update({ imageUrl: result.url, imageStatus: statusFor(result) });
     await sleep(180);
   }
 }
@@ -391,16 +399,18 @@ async function addSingleCard(name) {
   if (!name) return;
   const key = newKey("events/" + eventCode + "/prizePool");
   eventRef.child("prizePool/" + key).set({ name, addedAt: Date.now(), imageStatus: "loading" });
-  const img = await fetchCardImage(name);
-  eventRef.child("prizePool/" + key).update({ imageUrl: img, imageStatus: img ? "found" : "none" });
+  const result = await fetchCardImage(name);
+  eventRef.child("prizePool/" + key).update({ imageUrl: result.url, imageStatus: statusFor(result) });
 }
 async function retryMissingImages() {
   const pool = state.prizePool || {};
-  const missing = Object.entries(pool).filter(([, c]) => c.imageStatus !== "found");
+  // Only retry genuine transient failures — not entries Scryfall has
+  // confirmed aren't real cards (booster packs, box toppers, etc).
+  const missing = Object.entries(pool).filter(([, c]) => c.imageStatus === "none");
   for (const [id, c] of missing) {
     eventRef.child("prizePool/" + id + "/imageStatus").set("loading");
-    const img = await fetchCardImage(c.name);
-    eventRef.child("prizePool/" + id).update({ imageUrl: img, imageStatus: img ? "found" : "none" });
+    const result = await fetchCardImage(c.name);
+    eventRef.child("prizePool/" + id).update({ imageUrl: result.url, imageStatus: statusFor(result) });
     await sleep(180);
   }
 }
@@ -512,7 +522,7 @@ function render() {
     document.getElementById("paymentInfoPanel").innerHTML = `
       <div class="row"><b>Organizer</b>${esc(state.organizerName || "—")}</div>
       <div class="row"><b>Contact email</b>${esc(state.organizerEmail || "—")}</div>
-      <div class="row"><b>Entry cost</b>${esc(state.tournamentCost || "—")}</div>
+      <div class="row"><b>Entry cost</b>${esc(displayCost(state.tournamentCost))}</div>
       <div class="row"><b>Payment info</b>${esc(state.paymentEmail || "—")}</div>
     `;
   } else {
@@ -630,6 +640,10 @@ function renderTournament() {
 }
 
 function pct(n) { return (n * 100).toFixed(1) + "%"; }
+function displayCost(v) {
+  if (!v) return "—";
+  return v.startsWith("$") ? v : "$" + v;
+}
 
 function renderResults() {
   const wrap = document.getElementById("resultsTable");
@@ -684,7 +698,7 @@ function renderPrizes() {
         </div>`));
     });
 
-    const missingCount = pool.filter((c) => c.imageStatus !== "found").length;
+    const missingCount = pool.filter((c) => c.imageStatus === "none").length;
     const retryBtn = document.getElementById("retryImagesBtn");
     retryBtn.style.display = missingCount > 0 ? "inline-block" : "none";
     retryBtn.textContent = "🔄 Retry missing card images (" + missingCount + ")";

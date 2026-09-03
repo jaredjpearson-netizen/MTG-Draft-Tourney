@@ -14,41 +14,23 @@ Total setup time is about 10–15 minutes and doesn't require a credit card.
 
 ---
 
-## 1. Create the Firebase project (~5 min)
+## 1. Firebase project — already set up
 
-1. Go to [console.firebase.google.com](https://console.firebase.google.com) and sign
-   in with a Google account.
-2. Click **Add project**, give it any name (e.g. `mtg-draft-night`), and finish the
-   wizard. You can disable Google Analytics for this project — not needed.
-3. In the left sidebar, go to **Build → Realtime Database**.
-4. Click **Create Database**. Pick any region. When asked about security rules,
-   choose **Start in test mode** for now (we'll tighten it up in step 3).
-5. Once created, go to **Project settings** (gear icon, top left) → **General** tab
-   → scroll to **Your apps** → click the **</>** (web) icon to register a new web app.
-   Give it any nickname, skip Firebase Hosting (we're using GitHub Pages instead).
-6. You'll be shown a `firebaseConfig` object. Copy it.
+This copy of the app is already wired to the `mtg-draft-tourneys` Firebase
+project, with real values filled into `firebase-config.js`. You don't need
+to create a new project or touch that file unless you want to point the app
+at a different Firebase project entirely.
 
-## 2. Add your config to the app
+<details>
+<summary>For reference: how it was set up (click to expand)</summary>
 
-Open `firebase-config.js` in this folder and replace the placeholder values with
-the real ones from step 1, e.g.:
+1. [console.firebase.google.com](https://console.firebase.google.com) → **Add project**.
+2. **Build → Realtime Database → Create Database**, start in test mode.
+3. **Project settings → General → Your apps** → register a web app → copy the
+   `firebaseConfig` object into `firebase-config.js`.
+</details>
 
-```js
-const firebaseConfig = {
-  apiKey: "AIzaSy...",
-  authDomain: "mtg-draft-night.firebaseapp.com",
-  databaseURL: "https://mtg-draft-night-default-rtdb.firebaseio.com",
-  projectId: "mtg-draft-night",
-  storageBucket: "mtg-draft-night.appspot.com",
-  messagingSenderId: "123456789",
-  appId: "1:123456789:web:abc123",
-};
-```
-
-This file is safe to make public — it's not a secret. Firebase access is controlled
-by the database rules you set in the next step, not by hiding this config.
-
-## 3. Set your database rules
+## 2. Database rules
 
 Back in Firebase console → **Realtime Database → Rules** tab, replace the rules with:
 
@@ -71,53 +53,56 @@ worth knowing: don't use a guessable code for anything you'd mind a stranger pok
 at, and the app itself has no admin/player distinction — anyone with the link can
 record results or claim prize cards.
 
-## 4. Set up turn-notification emails (optional, ~5 min)
+## 3. Email setup — already configured
 
-If a player has an email address on file, the app will automatically email
-them the moment it becomes their turn to pick in the prize draft — including
-a link back to the event. This uses **EmailJS**, which sends email straight
-from the browser, so no backend server is needed here either.
+Both email templates run through the **mtgdrafttourneybot@gmail.com**
+account, connected as an EmailJS service. This is deliberately a separate
+account from any personal email — keeps tournament traffic out of your own
+inbox, and gives players a sensible "from" address.
 
-1. Create a free account at [emailjs.com](https://www.emailjs.com) (free tier:
-   200 emails/month).
-2. **Email Services → Add New Service** → connect Gmail, Outlook, or another
-   provider. Copy the **Service ID**.
-3. **Email Templates → Create New Template.** Use these variables anywhere in
-   the subject/body: `{{to_email}}`, `{{player_name}}`, `{{event_name}}`,
-   `{{event_link}}` — for example:
-   > Subject: It's your pick, {{player_name}}!
-   > Body: Your turn to pick a prize card in {{event_name}}. Open the draft: {{event_link}}
+- **`emailjs-prizedraft-config.js`** — the "it's your turn to pick" emails,
+  sent during the prize draft.
+- **`emailjs-start-config.js`** — the one-time "tournament started" welcome
+  email, sent to every registered player the moment the organizer clicks
+  **Start tournament**.
 
-   Copy the **Template ID**.
-4. **Account → General** → copy your **Public Key**.
-5. Open `emailjs-config.js` in this folder and paste in your Service ID,
-   Template ID, and Public Key.
+Both already have real Service ID / Template ID / Public Key values filled
+in. You shouldn't need to touch either file unless you want to change which
+EmailJS account or templates are used.
 
-If you skip this step, the app works exactly the same — it just won't send
-emails (everything happens live in the browser regardless, so this is purely
-an extra nudge for people who've stepped away from the screen).
+One thing worth double-checking on the EmailJS side: the *sending* Gmail
+account is whichever one `service_kfh50w8` is connected to in your EmailJS
+dashboard (**Email Services**), not something set in these files. If you
+haven't already, reconnect that service to mtgdrafttourneybot@gmail.com
+there (disconnect the old account first if it's still linked to a different
+one) — the config files just tell the app *which* service/template to call,
+not which mailbox it actually sends from.
 
-## 5. Set up the "tournament started" welcome email (optional)
+<details>
+<summary>For reference: how a template like this gets set up (click to expand)</summary>
 
-Separately from the turn-notification emails above, the app can also send a
-one-time "the tournament has started" email to every registered player,
-including the entry cost and a link back to the event — sent automatically
-the moment the organizer clicks **Start tournament**.
+1. Free account at [emailjs.com](https://www.emailjs.com) (200 emails/month free).
+2. **Email Services → Add New Service** → connect the Gmail account. Copy the Service ID.
+3. **Email Templates → Create New Template**, using whichever variables the
+   template needs (e.g. `{{to_email}}`, `{{player_name}}`, `{{event_name}}`,
+   `{{event_link}}`). Copy the Template ID.
+4. **Account → General** → copy the Public Key.
+5. **Important:** in the template's **Settings tab**, the "To Email" field
+   must be set to `{{to_email}}` — this is the single most common thing to
+   get wrong, and causes emails to silently fail to send.
 
-This uses its own EmailJS template, configured in `emailjs-start-config.js`.
-Set it up the same way as step 4 (new template, in the EmailJS dashboard),
-using these variables: `{{to_email}}`, `{{organiser}}`, `{{event_name}}`,
-`{{tournament_cost}}`, `{{event_link}}`. As with the template in step 4,
-double-check the template's **Settings tab → To Email** field is set to
-`{{to_email}}` — this is the most common thing to trip up on.
+</details>
 
-## 6. Put the files on GitHub Pages (~5 min)
+If a player doesn't have an email on file, they're simply skipped — nothing
+else in the app depends on it.
+
+## 4. Put the files on GitHub Pages (~5 min)
 
 1. Create a new **public** repository on [github.com](https://github.com) (e.g.
    `mtg-draft-night`).
-2. Upload all the files in this folder (`index.html`, `styles.css`, `app.js`,
-   `firebase-config.js` with your real values) to the repo — you can drag-and-drop
-   them in the GitHub web UI ("Add file" → "Upload files").
+2. Upload all the files in this folder — `index.html`, `styles.css`, `app.js`,
+   `firebase-config.js`, `emailjs-prizedraft-config.js`, `emailjs-start-config.js`
+   — to the repo. You can drag-and-drop them in the GitHub web UI ("Add file" → "Upload files").
 3. Go to the repo's **Settings → Pages**.
 4. Under **Build and deployment**, set **Source** to "Deploy from a branch", branch
    `main`, folder `/ (root)`. Save.
@@ -128,7 +113,7 @@ double-check the template's **Settings tab → To Email** field is set to
 folder instead of using GitHub — either is fine, this app doesn't care how it's
 hosted.)
 
-## 7. Run your draft night
+## 5. Run your draft night
 
 1. Open your GitHub Pages URL. You'll be asked for an event code — leave it blank
    and click **Join / create event** to generate a random one (or type your own,
@@ -147,16 +132,16 @@ hosted.)
 - The prize draft always runs winner-first, following the tournament ranking
   top to bottom and looping back to the top each time it reaches the last
   place — not a snake order.
-- Player email addresses are optional — only used to send the "it's your
-  turn" notification if you've set up EmailJS. Anyone at the table can still
-  see whose turn it is directly on screen either way.
-- Every player now needs an email address to be added — it's required, not
-  optional, since the app relies on it for both notification emails.
+- Player email addresses are required when adding a player, since the app
+  relies on them for both notification emails.
 - Hover (or tap-and-hold on mobile) over any card's art anywhere in the app
   to see a full-size preview.
-- If a big bulk card-add leaves a few cards without art (Scryfall
-  rate-limits large bursts), a "Retry missing card images" button appears
-  in the Prize pool setup to re-fetch just those.
+- Card art comes from Scryfall automatically. Entries that aren't real card
+  names (booster packs, box toppers, "mystery prize", etc.) just show a
+  generic placeholder and aren't flagged as a problem. If a genuine card's
+  art fails to load (rare — usually a rate-limit hiccup on a big bulk-add),
+  a "Retry missing card images" button appears in Prize pool setup to
+  re-fetch just those.
 - Data isn't automatically deleted — old events just sit in your database (free
   tier is generous, this won't cost anything for normal use). You can delete old
   event nodes manually in the Firebase console under **Realtime Database → Data**
