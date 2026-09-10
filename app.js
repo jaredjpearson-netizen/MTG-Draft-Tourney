@@ -152,7 +152,7 @@ function computeStandings() {
       }
       const p1Wins = m.p1Wins || 0;
       const p2Wins = m.p2Wins || 0;
-      if (p1Wins + p2Wins === 0 || !stats[m.p1] || !stats[m.p2]) return;
+      if (!matchComplete(m) || !stats[m.p1] || !stats[m.p2]) return;
       const s1 = stats[m.p1], s2 = stats[m.p2];
       s1.matchesPlayed += 1; s2.matchesPlayed += 1;
       s1.gamesWon += p1Wins; s1.gamesLost += p2Wins;
