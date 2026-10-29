@@ -90,7 +90,7 @@
         <div class="field-block">
           <label>Organizer PIN</label>
           <input type="password" id="organizerPinInput" inputmode="numeric" autocomplete="off" style="max-width:260px;" />
-          <p style="font-size:12px;color:var(--ink-soft);margin:5px 0 0;">If set, generating rounds, resets, drops, the prize draft controls and deleting the event ask for it. Score entry and picking prizes stay open to everyone.</p>
+          <p style="font-size:12px;color:var(--ink-soft);margin:5px 0 0;">If set, generating rounds, resets, editing or dropping players, the prize draft controls and deleting the event ask for it. Score entry and picking prizes stay open to everyone.</p>
         </div>
         <p style="font-size:12.5px;color:var(--ink-soft);margin:-6px 0 16px;">
           Starting the tournament sends a welcome email to all players.
@@ -137,7 +137,7 @@
       </label>
       <div id="prizeSetupView">
         <h2 class="section-title">Prize pool</h2>
-        <p class="section-sub">Bulk-add one card per line, or drop them in one at a time. Draft order follows the tournament ranking, top to bottom, looping back to the top until every card is claimed.</p>
+        <p class="section-sub">Bulk-add one card per line, or drop them in one at a time. Prices are Scryfall market prices converted to Canadian dollars. Tap a price to type your own (useful for booster packs). Draft order follows the tournament ranking, top to bottom, looping back to the top until every card is claimed.</p>
         <textarea id="bulkCardsInput" rows="4" placeholder="Sheoldred, the Apocalypse&#10;Ragavan, Nimble Pilferer&#10;Wrenn and Six"></textarea>
         <div class="field-row" style="margin-top:8px;">
           <button class="btn small" id="addBulkBtn">Add lines to pool</button>
@@ -150,6 +150,7 @@
         <div id="poolList" style="display:flex;flex-direction:column;gap:6px;max-height:220px;overflow-y:auto;margin-bottom:10px;"></div>
         <div class="field-row">
           <button class="btn small wine" id="retryImagesBtn" style="display:none;">🔄 Retry missing card images</button>
+          <button class="btn small" id="refreshPricesBtn">💲 Update prices</button>
         </div>
         <button class="btn" id="beginDraftBtn" style="margin-top:6px;">🏆 Start prize draft</button>
       </div>

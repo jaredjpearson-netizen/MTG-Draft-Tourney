@@ -154,12 +154,20 @@ hosted.)
   a "Retry missing card images" button appears in Prize pool setup to
   re-fetch just those.
 - **Organizer PIN** (optional, set in Tournament setup): once set, generating
-  rounds, resetting, dropping players, starting/undoing/restarting the prize
+  rounds, resetting, editing or dropping players, starting/undoing/restarting the prize
   draft, clearing the prize pool, the pick-email switch and deleting the event
   all ask for it. Score entry and picking prizes stay open to everyone. Each
   device only has to enter it once. To change it, type a new PIN in the same
   field (you'll be asked for the current one first if this device hasn't
   entered it yet).
+- **Editing players**: the ✎ next to a player's name (Players tab) edits their
+  name or email at any time, before or during the tournament.
+- **Card prices** come from Scryfall's market price (USD, for the card's
+  default printing, so it may differ from your exact copy) converted to
+  Canadian dollars at the day's exchange rate. The pool, the draft and each
+  player's haul show totals. Tap a price in the prize pool list to type your
+  own, e.g. for booster packs, which Scryfall can't price. **Update prices**
+  re-checks every card.
 - **Pick emails switch**: the checkbox at the top of the Prize draft tab turns
   the "your turn to pick" emails on or off, which saves most of the EmailJS
   monthly quota (200 emails/month) when everyone's in the same room.

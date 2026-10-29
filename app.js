@@ -13,6 +13,9 @@ let eventCode = null;
 let eventRef = null;
 let state = {}; // live mirror of the event's DB node
 let activeTab = "players";
+let usdToCad = null;       // exchange rate for card prices, loaded once per page load
+let usdToCadApprox = false;
+let editingPlayerId = null; // player whose name/email is being edited on this device
 let viewedRoundKey = null; // a past round being looked back at on the Tournament tab; null = current round
 
 /* ---------------------------------------------------------
@@ -334,6 +337,14 @@ function addPlayer(name, email) {
 function removePlayer(id) { if (!state.started) eventRef.child("players/" + id).remove(); }
 // Dropping keeps a player's past results (they still count for standings and
 // opponents' tiebreakers) but leaves them out of every future round.
+function savePlayerEdit(id, name, email) {
+  name = (name || "").trim();
+  email = (email || "").trim();
+  if (!name || !email) { alert("Please enter both a player name and an email address."); return false; }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { alert("That doesn't look like a valid email address — please double check it."); return false; }
+  eventRef.child("players/" + id).update({ name, email });
+  return true;
+}
 function setDropped(id, dropped) { if (state.started) eventRef.child("players/" + id + "/dropped").set(dropped ? true : null); }
 function isDropped(id) { return !!((state.players || {})[id] || {}).dropped; }
 
@@ -433,7 +444,11 @@ async function fetchCardImage(name, attempt) {
     let url = null;
     if (data.image_uris && data.image_uris.normal) url = data.image_uris.normal;
     else if (data.card_faces && data.card_faces[0] && data.card_faces[0].image_uris) url = data.card_faces[0].image_uris.normal;
-    return { url, notACard: !url };
+    // Scryfall's prices are USD market prices for the default printing;
+    // fall back to the foil/etched price for cards that only exist that way.
+    const p = data.prices || {};
+    const usd = parseFloat(p.usd || p.usd_foil || p.usd_etched);
+    return { url, notACard: !url, priceUsd: isNaN(usd) ? null : usd };
   } catch (e) {
     if (attempt < 2) { await sleep(600); return fetchCardImage(name, attempt + 1); }
     return { url: null, notACard: false };
@@ -441,6 +456,7 @@ async function fetchCardImage(name, attempt) {
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 function statusFor(result) { return result.url ? "found" : result.notACard ? "not_a_card" : "none"; }
+function cardFields(result) { return { imageUrl: result.url, imageStatus: statusFor(result), priceUsd: result.priceUsd ?? null }; }
 
 async function addBulkCards(text) {
   const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
@@ -453,7 +469,7 @@ async function addBulkCards(text) {
   // one at a time in the background rather than all at once.
   for (const e2 of entries) {
     const result = await fetchCardImage(e2.name);
-    eventRef.child("prizePool/" + e2.key).update({ imageUrl: result.url, imageStatus: statusFor(result) });
+    eventRef.child("prizePool/" + e2.key).update(cardFields(result));
     await sleep(180);
   }
 }
@@ -463,7 +479,7 @@ async function addSingleCard(name) {
   const key = newKey("events/" + eventCode + "/prizePool");
   eventRef.child("prizePool/" + key).set({ name, addedAt: Date.now(), imageStatus: "loading" });
   const result = await fetchCardImage(name);
-  eventRef.child("prizePool/" + key).update({ imageUrl: result.url, imageStatus: statusFor(result) });
+  eventRef.child("prizePool/" + key).update(cardFields(result));
 }
 async function retryMissingImages() {
   const pool = state.prizePool || {};
@@ -473,10 +489,64 @@ async function retryMissingImages() {
   for (const [id, c] of missing) {
     eventRef.child("prizePool/" + id + "/imageStatus").set("loading");
     const result = await fetchCardImage(c.name);
-    eventRef.child("prizePool/" + id).update({ imageUrl: result.url, imageStatus: statusFor(result) });
+    eventRef.child("prizePool/" + id).update(cardFields(result));
     await sleep(180);
   }
 }
+// Re-checks Scryfall prices for every real card in the pool (also fills in
+// prices for cards added before prices existed). Hand-entered prices win.
+async function refreshPrices() {
+  const pool = state.prizePool || {};
+  const cards = Object.entries(pool).filter(([, c]) => c.imageStatus !== "not_a_card");
+  for (const [id, c] of cards) {
+    const result = await fetchCardImage(c.name);
+    if (result.url || result.priceUsd != null) eventRef.child("prizePool/" + id).update(cardFields(result));
+    await sleep(180);
+  }
+}
+function setManualPrice(id) {
+  const c = (state.prizePool || {})[id];
+  if (!c) return;
+  const current = c.priceCad != null ? c.priceCad.toFixed(2) : "";
+  const input = prompt(`Price for "${c.name}" in CAD. Leave blank to use the Scryfall price.`, current);
+  if (input === null) return;
+  const v = parseFloat(input.replace(/[$,\s]/g, ""));
+  eventRef.child("prizePool/" + id + "/priceCad").set(input.trim() === "" || isNaN(v) ? null : Math.round(v * 100) / 100);
+}
+
+/* USD -> CAD. Fetched once per page load from free, keyless exchange-rate
+   APIs. If both are unreachable we fall back to a rough fixed rate and say so. */
+(async function loadExchangeRate() {
+  const sources = [
+    ["https://api.frankfurter.app/latest?from=USD&to=CAD", (d) => d.rates && d.rates.CAD],
+    ["https://open.er-api.com/v6/latest/USD", (d) => d.rates && d.rates.CAD],
+  ];
+  for (const [url, pick] of sources) {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) continue;
+      const rate = pick(await res.json());
+      if (rate) { usdToCad = rate; console.log("[MTG draft] USD→CAD rate:", rate); if (eventRef) render(); return; }
+    } catch (e) {}
+  }
+  usdToCad = 1.38; usdToCadApprox = true;
+  console.log("[MTG draft] Couldn't load an exchange rate — using an approximate 1.38.");
+  if (eventRef) render();
+})();
+function cardCad(c) {
+  if (c.priceCad != null) return c.priceCad;
+  if (c.priceUsd != null && usdToCad) return c.priceUsd * usdToCad;
+  return null;
+}
+function money(v) { return "$" + v.toLocaleString("en-CA", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+function poolTotalHTML(cards) {
+  const priced = cards.map(cardCad).filter((v) => v != null);
+  const unpriced = cards.length - priced.length;
+  const total = priced.reduce((a, b) => a + b, 0);
+  return `Total value: <b>${money(total)} CAD</b>${usdToCadApprox ? " (approx. rate)" : ""}` +
+    (unpriced ? ` · ${unpriced} item${unpriced === 1 ? "" : "s"} without a price` : "");
+}
+
 function removeCard(id) { if (!state.draftStarted) eventRef.child("prizePool/" + id).remove(); }
 function clearPool() { if (!state.draftStarted) eventRef.child("prizePool").remove(); }
 
@@ -570,6 +640,18 @@ function cardVisualHTML(c, kind) {
   return `<div class="${cls} ph">📦</div>`;
 }
 
+// editable: the setup pool list, where tapping the price lets you type one in
+// (handy for booster packs and other non-cards Scryfall can't price).
+function priceTagHTML(c, editable) {
+  const v = cardCad(c);
+  const text = v != null ? money(v) : editable ? "+ price" : "";
+  if (!text) return "";
+  const title = c.priceCad != null ? "Price entered by hand" : "Scryfall market price (converted to CAD)";
+  return editable
+    ? `<button class="price-tag edit ${v == null ? "empty" : ""}" data-set-price="${c.id}" title="${title}. Tap to change.">${text}</button>`
+    : `<span class="price-tag" title="${title}">${text}</span>`;
+}
+
 function render() {
   // header
   const nameInput = document.getElementById("eventNameInput");
@@ -605,25 +687,44 @@ function render() {
 function renderPlayers() {
   const players = playersArray();
   document.getElementById("playersSub").textContent = state.started
-    ? "Player list is locked once the tournament has started. Dropping a player keeps their results so far but leaves them out of future rounds."
+    ? "No new players once the tournament has started. ✎ fixes a name or email; dropping a player keeps their results so far but leaves them out of future rounds."
     : "Add everyone who's drafting.";
   document.getElementById("addPlayerRow").style.display = state.started ? "none" : "flex";
 
   const list = document.getElementById("playersList");
+  // Keep whatever's been typed into an open edit form across live re-renders.
+  const draftName = document.getElementById("editNameInput")?.value;
+  const draftEmail = document.getElementById("editEmailInput")?.value;
+  if (editingPlayerId && !(state.players || {})[editingPlayerId]) editingPlayerId = null;
   list.innerHTML = "";
   if (players.length === 0) {
     list.appendChild(el(`<p style="color:var(--ink-soft);font-size:14px;">No players yet — add a name above to get started.</p>`));
     return;
   }
   players.forEach((p, i) => {
+    if (p.id === editingPlayerId) {
+      list.appendChild(el(`
+        <div class="list-item editing">
+          <input type="text" id="editNameInput" value="${esc(draftName ?? p.name)}" placeholder="Player name" />
+          <input type="email" id="editEmailInput" value="${esc(draftEmail ?? p.email ?? "")}" placeholder="Email address" />
+          <div style="display:flex;gap:6px;">
+            <button class="btn small" data-save-player="${p.id}">Save</button>
+            <button class="btn small wine" data-cancel-edit>Cancel</button>
+          </div>
+        </div>`));
+      return;
+    }
     const row = el(`
       <div class="list-item ${p.dropped ? "dropped" : ""}" style="align-items:flex-start;">
         <span>
           <span style="color:var(--ink-soft);margin-right:6px;font-size:12.5px;">${i + 1}.</span>${esc(p.name)}${p.dropped ? ` <span class="dropped-tag">dropped</span>` : ""}
           ${p.email ? `<div style="font-size:11.5px;color:var(--ink-soft);margin-top:2px;">${esc(p.email)}</div>` : ""}
         </span>
-        ${!state.started ? `<button class="x-btn" data-remove-player="${p.id}">✕</button>`
-          : `<button class="drop-btn" data-drop-player="${p.id}">${p.dropped ? "Undo drop" : "Drop"}</button>`}
+        <span style="display:flex;align-items:center;gap:4px;">
+          <button class="x-btn" data-edit-player="${p.id}" title="Edit name or email">✎</button>
+          ${!state.started ? `<button class="x-btn" data-remove-player="${p.id}">✕</button>`
+            : `<button class="drop-btn" data-drop-player="${p.id}">${p.dropped ? "Undo drop" : "Drop"}</button>`}
+        </span>
       </div>`);
     list.appendChild(row);
   });
@@ -803,7 +904,7 @@ function renderPrizes() {
   if (!draftStarted) {
     const header = document.getElementById("poolHeader");
     header.innerHTML = pool.length
-      ? `<span style="font-size:13px;color:var(--ink-soft);">${pool.length} card${pool.length === 1 ? "" : "s"} in the pool</span>
+      ? `<span style="font-size:13px;color:var(--ink-soft);">${pool.length} card${pool.length === 1 ? "" : "s"} in the pool · ${poolTotalHTML(pool)}</span>
          <button id="clearPoolBtn" style="background:none;border:none;color:var(--wine);font-size:12.5px;cursor:pointer;">Clear all</button>`
       : "";
     const poolList = document.getElementById("poolList");
@@ -815,7 +916,10 @@ function renderPrizes() {
             ${cardVisualHTML(c, "thumb")}
             ${esc(c.name)}
           </span>
-          <button class="x-btn" data-remove-card="${c.id}">✕</button>
+          <span style="display:flex;align-items:center;gap:8px;">
+            ${priceTagHTML(c, true)}
+            <button class="x-btn" data-remove-card="${c.id}">✕</button>
+          </span>
         </div>`));
     });
 
@@ -835,7 +939,8 @@ function renderPrizes() {
   const draftComplete = remaining.length === 0;
 
   document.getElementById("prizeTitle").textContent = draftComplete ? "Prize draft complete" : "Prize draft";
-  document.getElementById("prizeSub").textContent = draftComplete ? "Every card has a home." : `Pick ${claims.length + 1} · ${remaining.length} card${remaining.length === 1 ? "" : "s"} left`;
+  document.getElementById("prizeSub").innerHTML = (draftComplete ? "Every card has a home." : `Pick ${claims.length + 1} · ${remaining.length} card${remaining.length === 1 ? "" : "s"} left`) +
+    `<br>${poolTotalHTML(pool)}`;
   document.getElementById("undoPickBtn").disabled = claims.length === 0;
 
   const banner = document.getElementById("pickerBanner");
@@ -856,7 +961,7 @@ function renderPrizes() {
         <button class="card-tile" data-claim="${c.id}">
           ${cardVisualHTML(c, "tile")}
           ${c.imageUrl ? `<span class="zoom-btn" data-zoom="${esc(c.imageUrl)}" title="Enlarge">🔍</span>` : ""}
-          <div class="card-tile-name">${esc(c.name)}</div>
+          <div class="card-tile-name">${esc(c.name)}${priceTagHTML(c, false)}</div>
         </button>`));
     });
   }
@@ -866,11 +971,12 @@ function renderPrizes() {
   resultsGrid.innerHTML = "";
   players.forEach((p) => {
     const cards = claims.filter((c) => c.playerId === p.id).map((c) => pool.find((x) => x.id === c.cardId)).filter(Boolean);
+    const haul = cards.map(cardCad).filter((v) => v != null).reduce((a, b) => a + b, 0);
     resultsGrid.appendChild(el(`
       <div class="result-card">
-        <div class="pname">${esc(p.name)}</div>
+        <div class="pname">${esc(p.name)}${cards.length ? `<span class="haul">${money(haul)}</span>` : ""}</div>
         ${cards.length === 0 ? `<p class="empty">No picks yet</p>` : cards.map((c) => `
-          <div class="result-card-item">${cardVisualHTML(c, "mini")}<span>${esc(c.name)}</span></div>`).join("")}
+          <div class="result-card-item">${cardVisualHTML(c, "mini")}<span style="flex:1;">${esc(c.name)}</span>${priceTagHTML(c, false)}</div>`).join("")}
       </div>`));
   });
 }
@@ -924,6 +1030,12 @@ document.getElementById("addBulkBtn").addEventListener("click", () => {
   addBulkCards(ta.value); ta.value = "";
 });
 document.getElementById("retryImagesBtn").addEventListener("click", () => retryMissingImages());
+document.getElementById("refreshPricesBtn").addEventListener("click", async (e) => {
+  const btn = e.currentTarget;
+  btn.disabled = true; btn.textContent = "💲 Updating prices…";
+  await refreshPrices();
+  btn.disabled = false; btn.textContent = "💲 Update prices";
+});
 document.getElementById("addSingleBtn").addEventListener("click", () => {
   const input = document.getElementById("singleCardInput");
   addSingleCard(input.value); input.value = "";
@@ -951,6 +1063,17 @@ document.getElementById("app").addEventListener("click", (e) => {
   const rm = e.target.closest("[data-remove-player]");
   if (rm) return removePlayer(rm.dataset.removePlayer);
 
+  const ep = e.target.closest("[data-edit-player]");
+  if (ep) return organizerOnly(() => { editingPlayerId = ep.dataset.editPlayer; render(); document.getElementById("editNameInput")?.focus(); })();
+
+  const svp = e.target.closest("[data-save-player]");
+  if (svp) {
+    const ok = savePlayerEdit(svp.dataset.savePlayer, document.getElementById("editNameInput").value, document.getElementById("editEmailInput").value);
+    if (ok) { editingPlayerId = null; render(); }
+    return;
+  }
+  if (e.target.closest("[data-cancel-edit]")) { editingPlayerId = null; return render(); }
+
   const dp = e.target.closest("[data-drop-player]");
   if (dp) {
     const id = dp.dataset.dropPlayer;
@@ -965,6 +1088,9 @@ document.getElementById("app").addEventListener("click", (e) => {
 
   const gm = e.target.closest("[data-game]");
   if (gm) { const [rk, mid, side, delta] = gm.dataset.game.split("|"); return setGameWins(rk, mid, side, parseInt(delta)); }
+
+  const sp = e.target.closest("[data-set-price]");
+  if (sp) return setManualPrice(sp.dataset.setPrice);
 
   const rc = e.target.closest("[data-remove-card]");
   if (rc) return removeCard(rc.dataset.removeCard);
