@@ -842,12 +842,12 @@ function renderPlayers() {
       return;
     }
     const row = el(`
-      <div class="list-item ${p.dropped ? "dropped" : ""}" style="align-items:flex-start;">
-        <span>
+      <div class="list-item player-item ${p.dropped ? "dropped" : ""}">
+        <span class="player-info">
           <span style="color:var(--ink-soft);margin-right:6px;font-size:12.5px;">${i + 1}.</span>${esc(p.name)}${p.dropped ? ` <span class="dropped-tag">dropped</span>` : ""}
-          ${p.email ? `<div style="font-size:11.5px;color:var(--ink-soft);margin-top:2px;">${esc(p.email)}</div>` : ""}
+          ${p.email ? `<div class="player-email">${esc(p.email)}</div>` : ""}
         </span>
-        <span style="display:flex;align-items:center;gap:4px;">
+        <span class="player-actions">
           <button class="x-btn" data-edit-player="${p.id}" title="Edit name or email">✎</button>
           ${!state.started ? `<button class="x-btn" data-remove-player="${p.id}">✕</button>`
             : `<button class="drop-btn" data-drop-player="${p.id}">${p.dropped ? "Undo drop" : "Drop"}</button>`}
