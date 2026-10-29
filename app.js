@@ -63,6 +63,7 @@ function openEvent(code) {
     if (!snap.exists()) {
       eventRef.set({
         eventName: eventCode,
+        createdAt: Date.now(),
         players: {},
         totalRounds: 3,
         started: false,
@@ -108,6 +109,109 @@ function leaveEvent() {
   joinCodeInput.value = "";
 }
 
+/* ---------------------------------------------------------
+   Manage tournaments (start screen)
+   Listing every event needs read access to the whole "events" node, which
+   the database rules only give to the signed-in admin account (adminEmail
+   in firebase-config.js). The master password is that account's password,
+   checked by Firebase, so it never appears in this code.
+--------------------------------------------------------- */
+const auth = firebase.auth ? firebase.auth() : null;
+const manageScreen = document.getElementById("manageScreen");
+const manageError = document.getElementById("manageError");
+
+function showManage() {
+  joinScreen.style.display = "none";
+  manageScreen.style.display = "block";
+  manageError.textContent = "";
+  if (auth && auth.currentUser) loadAllEvents();
+  else {
+    document.getElementById("manageLogin").style.display = "block";
+    document.getElementById("manageList").style.display = "none";
+    document.getElementById("masterPasswordInput").focus();
+  }
+}
+function hideManage() {
+  manageScreen.style.display = "none";
+  joinScreen.style.display = "block";
+}
+async function masterLogin() {
+  const input = document.getElementById("masterPasswordInput");
+  manageError.textContent = "";
+  if (!auth) { manageError.textContent = "Sign-in didn't load. Check your connection and refresh."; return; }
+  try {
+    await auth.signInWithEmailAndPassword(adminEmail, input.value);
+    input.value = "";
+    loadAllEvents();
+  } catch (err) {
+    console.error("[MTG draft] Master sign-in failed:", err);
+    manageError.textContent = /wrong-password|invalid-credential|invalid-login/.test(err.code || "")
+      ? "That password isn't right."
+      : "Couldn't sign in (" + (err.code || err.message) + "). Check the Manage tournaments setup in the README.";
+  }
+}
+function lastActivity(ev) {
+  let t = ev.createdAt || 0;
+  const bump = (obj, field) => Object.values(obj || {}).forEach((x) => { if (x && x[field] > t) t = x[field]; });
+  bump(ev.players, "addedAt"); bump(ev.prizePool, "addedAt"); bump(ev.claims, "ts");
+  return t;
+}
+function eventStatus(ev) {
+  const rounds = Object.keys(ev.rounds || {}).length;
+  const pool = Object.keys(ev.prizePool || {}).length;
+  const claims = Object.keys(ev.claims || {}).length;
+  if (ev.draftStarted) return claims >= pool ? "Prize draft finished" : "Prize draft in progress";
+  if (ev.started) return `Round ${rounds} of ${ev.totalRounds || 3}`;
+  return "Not started";
+}
+async function loadAllEvents() {
+  document.getElementById("manageLogin").style.display = "none";
+  document.getElementById("manageList").style.display = "block";
+  const list = document.getElementById("eventsList");
+  list.innerHTML = `<p class="manage-empty">Loading…</p>`;
+  let all;
+  try {
+    all = (await db.ref("events").once("value")).val() || {};
+  } catch (err) {
+    console.error("[MTG draft] Couldn't list events:", err);
+    list.innerHTML = `<p class="manage-error">The database wouldn't list the tournaments. The Firebase rules probably need the update described in the README under "Manage tournaments".</p>`;
+    return;
+  }
+  const events = Object.entries(all).map(([code, ev]) => ({ code, ev, last: lastActivity(ev) })).sort((a, b) => b.last - a.last);
+  document.getElementById("manageCount").textContent = `${events.length} tournament${events.length === 1 ? "" : "s"}`;
+  list.innerHTML = events.length ? "" : `<p class="manage-empty">No tournaments yet.</p>`;
+  events.forEach(({ code, ev, last }) => {
+    const players = Object.keys(ev.players || {}).length;
+    list.appendChild(el(`
+      <div class="event-row">
+        <div class="event-info">
+          <div class="event-name">${esc(ev.eventName || code)} <span class="event-code">${esc(code)}</span></div>
+          <div class="event-meta">${players} player${players === 1 ? "" : "s"} · ${eventStatus(ev)}${last ? " · " + new Date(last).toLocaleDateString() : ""}</div>
+        </div>
+        <div class="event-actions">
+          <button class="btn small" data-open-event="${esc(code)}">Open</button>
+          <button class="btn small wine" data-delete-event="${esc(code)}">🗑 Delete</button>
+        </div>
+      </div>`));
+  });
+}
+document.getElementById("manageBtn").addEventListener("click", showManage);
+document.getElementById("manageBackBtn").addEventListener("click", hideManage);
+document.getElementById("masterLoginBtn").addEventListener("click", masterLogin);
+document.getElementById("masterPasswordInput").addEventListener("keydown", (e) => { if (e.key === "Enter") masterLogin(); });
+document.getElementById("manageSignOutBtn").addEventListener("click", async () => { if (auth) await auth.signOut(); showManage(); });
+document.getElementById("eventsList").addEventListener("click", async (e) => {
+  const open = e.target.closest("[data-open-event]");
+  if (open) { manageScreen.style.display = "none"; return openEvent(open.dataset.openEvent); }
+  const del = e.target.closest("[data-delete-event]");
+  if (del) {
+    const code = del.dataset.deleteEvent;
+    if (!confirm(`Delete tournament ${code} for everyone? This removes all its players, results and prizes, and can't be undone.`)) return;
+    await db.ref("events/" + code).remove();
+    loadAllEvents();
+  }
+});
+
 // auto-join if ?event=CODE is in the URL
 (function initFromUrl() {
   const url = new URL(window.location.href);
@@ -150,12 +254,6 @@ async function setOrganizerPin(pin) {
   try { if (hash) localStorage.setItem(unlockKey(), hash); } catch (e) {}
 }
 
-function deleteEvent() {
-  if (!confirm(`Delete event ${eventCode} for everyone? This can't be undone.`)) return;
-  const ref = eventRef;
-  leaveEvent();
-  ref.remove();
-}
 
 /* ---------------------------------------------------------
    Helpers: pull arrays out of the Firebase object shape
@@ -1023,7 +1121,6 @@ document.getElementById("nextRoundBtn").addEventListener("click", organizerOnly(
 document.getElementById("resetTournamentBtn").addEventListener("click", organizerOnly(() => {
   if (confirm("Reset the tournament? This clears all rounds and results.")) resetTournament();
 }));
-document.getElementById("deleteEventBtn").addEventListener("click", organizerOnly(deleteEvent));
 
 document.getElementById("addBulkBtn").addEventListener("click", () => {
   const ta = document.getElementById("bulkCardsInput");
