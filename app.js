@@ -139,7 +139,7 @@ function computeStandings() {
   const stats = {};
   players.forEach((p) => {
     stats[p.id] = {
-      id: p.id, name: p.name, points: 0, wins: 0, losses: 0, draws: 0, byes: 0,
+      id: p.id, name: p.name, dropped: !!p.dropped, points: 0, wins: 0, losses: 0, draws: 0, byes: 0,
       matchesPlayed: 0, gamesWon: 0, gamesLost: 0, opponents: [],
     };
   });
@@ -209,7 +209,10 @@ function generateRound1Pairings() {
   const pool = playersArray().map((p) => p.id);
   const matches = [];
   if (pool.length % 2 === 1) {
-    matches.push({ p1: pool.pop(), p2: null, bye: true });
+    // Everyone's tied, so the bye goes to a random player rather than
+    // always the last seat.
+    const [byeId] = pool.splice(Math.floor(Math.random() * pool.length), 1);
+    matches.push({ p1: byeId, p2: null, bye: true });
   }
   const half = pool.length / 2;
   const top = pool.slice(0, half);
@@ -227,7 +230,7 @@ function generateRound1Pairings() {
 // option. A rematch is only allowed when no rematch-free pairing exists.
 function generateSwissPairings(rounds) {
   const standings = computeStandings(); // already sorted: points, then OMW%/GW%/OGW% tiebreakers
-  const ids = standings.map((s) => s.id);
+  const ids = standings.map((s) => s.id).filter((id) => !isDropped(id));
 
   // Bye candidates: lowest-ranked player who hasn't had one comes first.
   // Everyone else (if all have had one) follows, still bottom-up.
@@ -281,6 +284,10 @@ function addPlayer(name, email) {
   eventRef.child("players/" + key).set({ name, email, addedAt: Date.now() });
 }
 function removePlayer(id) { if (!state.started) eventRef.child("players/" + id).remove(); }
+// Dropping keeps a player's past results (they still count for standings and
+// opponents' tiebreakers) but leaves them out of every future round.
+function setDropped(id, dropped) { if (state.started) eventRef.child("players/" + id + "/dropped").set(dropped ? true : null); }
+function isDropped(id) { return !!((state.players || {})[id] || {}).dropped; }
 
 function setTotalRounds(n) { eventRef.child("totalRounds").set(Math.max(1, Math.min(9, n))); }
 
@@ -549,7 +556,7 @@ function render() {
 function renderPlayers() {
   const players = playersArray();
   document.getElementById("playersSub").textContent = state.started
-    ? "Player list is locked once the tournament has started."
+    ? "Player list is locked once the tournament has started. Dropping a player keeps their results so far but leaves them out of future rounds."
     : "Add everyone who's drafting.";
   document.getElementById("addPlayerRow").style.display = state.started ? "none" : "flex";
 
@@ -561,12 +568,13 @@ function renderPlayers() {
   }
   players.forEach((p, i) => {
     const row = el(`
-      <div class="list-item" style="align-items:flex-start;">
+      <div class="list-item ${p.dropped ? "dropped" : ""}" style="align-items:flex-start;">
         <span>
-          <span style="color:var(--ink-soft);margin-right:6px;font-size:12.5px;">${i + 1}.</span>${esc(p.name)}
+          <span style="color:var(--ink-soft);margin-right:6px;font-size:12.5px;">${i + 1}.</span>${esc(p.name)}${p.dropped ? ` <span class="dropped-tag">dropped</span>` : ""}
           ${p.email ? `<div style="font-size:11.5px;color:var(--ink-soft);margin-top:2px;">${esc(p.email)}</div>` : ""}
         </span>
-        ${state.started ? "" : `<button class="x-btn" data-remove-player="${p.id}">✕</button>`}
+        ${!state.started ? `<button class="x-btn" data-remove-player="${p.id}">✕</button>`
+          : `<button class="drop-btn" data-drop-player="${p.id}">${p.dropped ? "Undo drop" : "Drop"}</button>`}
       </div>`);
     list.appendChild(row);
   });
@@ -664,7 +672,7 @@ function renderTournament() {
   computeStandings().forEach((s, i) => {
     standingsList.appendChild(el(`
       <div class="standing-row ${i === 0 ? "lead" : ""}">
-        <span style="color:var(--ink);"><span style="color:var(--ink-soft);margin-right:6px;">${i + 1}.</span>${esc(s.name)}</span>
+        <span style="color:var(--ink);"><span style="color:var(--ink-soft);margin-right:6px;">${i + 1}.</span>${esc(s.name)}${s.dropped ? ` <span class="dropped-tag">dropped</span>` : ""}</span>
         <span class="pts">${s.wins}-${s.losses}${s.draws ? "-" + s.draws : ""} · ${s.points} pts</span>
       </div>`));
   });
@@ -723,7 +731,7 @@ function renderResults() {
     wrap.appendChild(el(`
       <div class="results-table-row data ${i === 0 ? "lead" : ""}">
         <span style="color:var(--ink-soft);">${i + 1}</span>
-        <span>${esc(s.name)}</span>
+        <span>${esc(s.name)}${s.dropped ? ` <span class="dropped-tag">dropped</span>` : ""}</span>
         <span class="stat">${s.points}</span>
         <span class="stat">${pct(s.matchWinPct)}</span>
         <span class="stat">${pct(s.omw)}</span>
@@ -796,6 +804,7 @@ function renderPrizes() {
       cardsGrid.appendChild(el(`
         <button class="card-tile" data-claim="${c.id}">
           ${cardVisualHTML(c, "tile")}
+          ${c.imageUrl ? `<span class="zoom-btn" data-zoom="${esc(c.imageUrl)}" title="Enlarge">🔍</span>` : ""}
           <div class="card-tile-name">${esc(c.name)}</div>
         </button>`));
     });
@@ -884,6 +893,14 @@ document.getElementById("app").addEventListener("click", (e) => {
   const rm = e.target.closest("[data-remove-player]");
   if (rm) return removePlayer(rm.dataset.removePlayer);
 
+  const dp = e.target.closest("[data-drop-player]");
+  if (dp) {
+    const id = dp.dataset.dropPlayer;
+    if (isDropped(id)) return setDropped(id, false);
+    if (confirm(`Drop ${nameOf(id)}? They keep their results so far but won't be paired in future rounds. If they're in an unfinished match this round, record it as a 2-0 win for their opponent.`)) setDropped(id, true);
+    return;
+  }
+
   const vr = e.target.closest("[data-view-round]");
   if (vr) { viewedRoundKey = vr.dataset.viewRound || null; return render(); }
 
@@ -916,7 +933,32 @@ function positionCardPreview(e) {
   cardPreview.style.top = y + "px";
 }
 
+// Touch screens can't hover, so there a tap opens the card full-size in the
+// middle of the screen and any tap closes it. Draft tiles claim on tap, so
+// they get a separate 🔍 button for this instead.
+const isTouch = window.matchMedia("(hover: none)").matches;
+function openCardModal(url) {
+  cardPreviewImg.src = url;
+  cardPreview.classList.add("modal");
+  cardPreview.style.display = "flex";
+}
+document.addEventListener("click", (e) => {
+  if (cardPreview.classList.contains("modal")) {
+    cardPreview.classList.remove("modal");
+    cardPreview.style.display = "none";
+    e.stopPropagation(); e.preventDefault();
+    return;
+  }
+  const z = e.target.closest("[data-zoom]");
+  const p = isTouch && !e.target.closest("[data-claim]") && e.target.closest("[data-preview]");
+  if (z || p) {
+    e.stopPropagation(); e.preventDefault();
+    openCardModal((z || p).dataset.zoom || (z || p).dataset.preview);
+  }
+}, true);
+
 document.addEventListener("mouseover", (e) => {
+  if (isTouch) return;
   const t = e.target.closest("[data-preview]");
   if (!t) return;
   cardPreviewImg.src = t.dataset.preview;

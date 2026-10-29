@@ -134,8 +134,18 @@ hosted.)
   place — not a snake order.
 - Player email addresses are required when adding a player, since the app
   relies on them for both notification emails.
-- Hover (or tap-and-hold on mobile) over any card's art anywhere in the app
-  to see a full-size preview.
+- Hover over any card's art anywhere in the app to see a full-size preview.
+  On phones and tablets, tap the art instead (in the prize draft, tap the 🔍
+  on a card, since tapping the card itself picks it). Tap again to close.
+- Swiss pairing avoids rematches: if a straightforward pairing would leave two
+  players who've already met, it reshuffles until no one repeats an opponent
+  (a rematch only happens when there's truly no other option). In round 1 an
+  odd player out gets a bye at random.
+- Once the tournament is running, the Tournament tab has round buttons to look
+  back at any earlier round's matchups and scores.
+- To drop a player mid-tournament, use **Drop** next to their name on the
+  Players tab. They keep their results so far but aren't paired again. If
+  they leave partway through a match, record it as 2-0 for their opponent.
 - Card art comes from Scryfall automatically. Entries that aren't real card
   names (booster packs, box toppers, "mystery prize", etc.) just show a
   generic placeholder and aren't flagged as a problem. If a genuine card's
