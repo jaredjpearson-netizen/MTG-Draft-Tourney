@@ -6,7 +6,7 @@
 <title>Magic Draft Tourney</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23152C26'/%3E%3Cpath d='M32 9 L38 26 L55 32 L38 38 L32 55 L26 38 L9 32 L26 26 Z' fill='%23E4C24C'/%3E%3C/svg%3E" />
 <!-- Bump the ?v= numbers below whenever styles.css or app.js change, so browsers fetch the new files instead of a cached copy. -->
-<link rel="stylesheet" href="styles.css?v=4" />
+<link rel="stylesheet" href="styles.css?v=5" />
 </head>
 <body>
 
@@ -205,6 +205,18 @@
   </div>
 </div>
 
+<div id="variantPicker" style="display:none;">
+  <div class="variant-panel">
+    <div class="variant-head">
+      <h3 id="variantTitle"></h3>
+      <button class="x-btn" id="variantCloseBtn" title="Close">✕</button>
+    </div>
+    <p class="variant-sub">Pick the printing and finish of your copy. The card's picture and price will match it.</p>
+    <div id="variantList"></div>
+    <button class="link-btn" id="variantResetBtn">Go back to the default printing</button>
+  </div>
+</div>
+
 <div id="cardPreview"><img id="cardPreviewImg" src="" alt="" /></div>
 
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
@@ -214,6 +226,6 @@
 <script src="firebase-config.js"></script>
 <script src="emailjs-prizedraft-config.js"></script>
 <script src="emailjs-start-config.js"></script>
-<script src="app.js?v=4"></script>
+<script src="app.js?v=5"></script>
 </body>
 </html>
