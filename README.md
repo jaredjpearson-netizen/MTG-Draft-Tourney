@@ -210,7 +210,8 @@ hosted.)
   the player whose turn it is can take a card, and it asks to confirm first.
   The organizer, after entering the PIN, can pick on anyone's behalf.
 - **Sorting the prize grid**: during the draft, each person can sort the cards
-  by price, rarity or color (their choice is remembered on their device).
+  by price, rarity, color or card type (their choice is remembered on their
+  device). Colorless artifacts and lands sort with the color they make or use.
   Unpriced "exotic" prizes such as booster packs always come first.
 - **Pick emails switch**: the checkbox at the top of the Prize draft tab turns
   the "your turn to pick" emails on or off, which saves most of the EmailJS
