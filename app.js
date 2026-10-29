@@ -1121,7 +1121,13 @@ function renderPrizes() {
   cardsGrid.innerHTML = "";
   cardsGrid.style.display = draftComplete ? "none" : "grid";
   if (!draftComplete) {
-    remaining.forEach((c) => {
+    // Exotic (unpriced) prizes first, then most valuable to least.
+    const byValue = remaining.slice().sort((a, b) => {
+      const va = cardCad(a), vb = cardCad(b);
+      if (va == null || vb == null) return (va == null ? 0 : 1) - (vb == null ? 0 : 1);
+      return vb - va;
+    });
+    byValue.forEach((c) => {
       cardsGrid.appendChild(el(`
         <button class="card-tile" data-claim="${c.id}">
           ${cardVisualHTML(c, "tile")}
