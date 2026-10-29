@@ -50,8 +50,9 @@ Back in Firebase console → **Realtime Database → Rules** tab, replace the ru
 Click **Publish**. This means anyone who knows a specific event code can read and
 write that event's data — fine for a casual home tournament (there's no login), but
 worth knowing: don't use a guessable code for anything you'd mind a stranger poking
-at, and the app itself has no admin/player distinction — anyone with the link can
-record results or claim prize cards.
+at. Anyone with the link can record results or claim prize cards. The optional
+organizer PIN (see Notes) guards the bigger actions, but it's a speed bump
+against accidents rather than real security.
 
 ## 3. Email setup — already configured
 
@@ -152,8 +153,18 @@ hosted.)
   art fails to load (rare — usually a rate-limit hiccup on a big bulk-add),
   a "Retry missing card images" button appears in Prize pool setup to
   re-fetch just those.
-- Data isn't automatically deleted — old events just sit in your database (free
-  tier is generous, this won't cost anything for normal use). You can delete old
-  event nodes manually in the Firebase console under **Realtime Database → Data**
-  if you want to tidy up.
+- **Organizer PIN** (optional, set in Tournament setup): once set, generating
+  rounds, resetting, dropping players, starting/undoing/restarting the prize
+  draft, clearing the prize pool, the pick-email switch and deleting the event
+  all ask for it. Score entry and picking prizes stay open to everyone. Each
+  device only has to enter it once. To change it, type a new PIN in the same
+  field (you'll be asked for the current one first if this device hasn't
+  entered it yet).
+- **Pick emails switch**: the checkbox at the top of the Prize draft tab turns
+  the "your turn to pick" emails on or off, which saves most of the EmailJS
+  monthly quota (200 emails/month) when everyone's in the same room.
+- **Delete this event** (bottom of the Players tab) removes the event and all
+  its data for everyone. Older events can also be deleted by hand in the
+  Firebase console under **Realtime Database → Data**. Each event is tiny, so
+  the free tier won't fill up in normal use.
 - To run a second, unrelated event later, just use a different event code.

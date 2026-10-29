@@ -72,7 +72,12 @@ function openEvent(code) {
   });
 
   let initialTabSet = false;
+  let hadData = false;
+  const thisRef = eventRef;
   eventRef.on("value", (snap) => {
+    if (eventRef !== thisRef) return; // we've already left this event
+    if (hadData && !snap.exists()) { leaveEvent(); alert("This event was deleted by the organizer."); return; }
+    if (snap.exists()) hadData = true;
     state = snap.val() || {};
     if (!initialTabSet) { activeTab = computeDefaultTab(); initialTabSet = true; }
     joinScreen.style.display = "none";
@@ -88,7 +93,8 @@ function openEvent(code) {
 document.getElementById("joinBtn").addEventListener("click", () => openEvent(joinCodeInput.value));
 joinCodeInput.addEventListener("keydown", (e) => { if (e.key === "Enter") openEvent(joinCodeInput.value); });
 
-document.getElementById("codeBadge").addEventListener("click", () => {
+document.getElementById("codeBadge").addEventListener("click", () => leaveEvent());
+function leaveEvent() {
   if (eventRef) eventRef.off();
   eventCode = null; eventRef = null; state = {};
   const url = new URL(window.location.href);
@@ -97,7 +103,7 @@ document.getElementById("codeBadge").addEventListener("click", () => {
   appRoot.style.display = "none";
   joinScreen.style.display = "block";
   joinCodeInput.value = "";
-});
+}
 
 // auto-join if ?event=CODE is in the URL
 (function initFromUrl() {
@@ -105,6 +111,48 @@ document.getElementById("codeBadge").addEventListener("click", () => {
   const code = url.searchParams.get("event");
   if (code) openEvent(code);
 })();
+
+/* ---------------------------------------------------------
+   Organizer PIN
+   An optional PIN that guards the big actions (generating rounds, resets,
+   drops, starting/undoing the prize draft, deleting the event). It's a
+   speed bump against accidents and casual meddling, not real security:
+   only a hash is stored, but the database itself is still open. Once
+   entered correctly on a device, that device isn't asked again.
+--------------------------------------------------------- */
+async function hashPin(pin) {
+  const data = new TextEncoder().encode(eventCode + ":" + pin);
+  const buf = await crypto.subtle.digest("SHA-256", data);
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+function unlockKey() { return "mtg-organizer-" + eventCode; }
+async function requireOrganizer() {
+  if (!state.organizerPinHash) return true;
+  try { if (localStorage.getItem(unlockKey()) === state.organizerPinHash) return true; } catch (e) {}
+  const pin = prompt("Enter the organizer PIN to do this.");
+  if (pin === null) return false;
+  if ((await hashPin(pin.trim())) !== state.organizerPinHash) { alert("That PIN isn't right."); return false; }
+  try { localStorage.setItem(unlockKey(), state.organizerPinHash); } catch (e) {}
+  return true;
+}
+// Wraps an action so it only runs once the organizer PIN (if any) checks out.
+function organizerOnly(fn) {
+  return async (...args) => { if (await requireOrganizer()) fn(...args); };
+}
+async function setOrganizerPin(pin) {
+  pin = (pin || "").trim();
+  if (!(await requireOrganizer())) return;
+  const hash = pin ? await hashPin(pin) : null;
+  eventRef.child("organizerPinHash").set(hash);
+  try { if (hash) localStorage.setItem(unlockKey(), hash); } catch (e) {}
+}
+
+function deleteEvent() {
+  if (!confirm(`Delete event ${eventCode} for everyone? This can't be undone.`)) return;
+  const ref = eventRef;
+  leaveEvent();
+  ref.remove();
+}
 
 /* ---------------------------------------------------------
    Helpers: pull arrays out of the Firebase object shape
@@ -487,6 +535,7 @@ function sendPickEmail(player) {
 // the same event, only one of them actually sends the email for a given pick.
 function notifyCurrentPickerIfNeeded() {
   if (!state.draftStarted) return;
+  if (state.pickEmailsOff) return; // organizer turned turn emails off (e.g. everyone's in the room)
   if (!emailjsReady) { console.log("[MTG draft] EmailJS not configured — skipping turn notification."); return; }
   const pool = state.prizePool || {};
   const claimsCount = Object.keys(state.claims || {}).length;
@@ -594,6 +643,7 @@ function renderTournament() {
   if (document.activeElement !== orgEmailInput) orgEmailInput.value = state.organizerEmail || "";
   if (document.activeElement !== costInput) costInput.value = (state.tournamentCost || "").replace(/^\$/, "");
   if (document.activeElement !== payInput) payInput.value = state.paymentEmail || "";
+  document.getElementById("organizerPinInput").placeholder = state.organizerPinHash ? "PIN is set. Type a new one to change it." : "Optional, e.g. 4 digits";
 
   const running = !!state.started;
   document.getElementById("setupView").style.display = running ? "none" : "block";
@@ -745,6 +795,7 @@ function renderPrizes() {
   const players = playersArray();
   const pool = Object.entries(state.prizePool || {}).map(([id, v]) => ({ id, ...v })).sort((a, b) => (a.addedAt || 0) - (b.addedAt || 0));
   const draftStarted = !!state.draftStarted;
+  document.getElementById("pickEmailsToggle").checked = !state.pickEmailsOff;
 
   document.getElementById("prizeSetupView").style.display = draftStarted ? "none" : "block";
   document.getElementById("prizeActiveView").style.display = draftStarted ? "block" : "none";
@@ -853,7 +904,8 @@ document.getElementById("newPlayerEmailInput").addEventListener("keydown", (e) =
 
 document.getElementById("roundsMinus").addEventListener("click", () => setTotalRounds((state.totalRounds || 3) - 1));
 document.getElementById("roundsPlus").addEventListener("click", () => setTotalRounds((state.totalRounds || 3) + 1));
-document.getElementById("startTournamentBtn").addEventListener("click", startTournament);
+document.getElementById("startTournamentBtn").addEventListener("click", organizerOnly(startTournament));
+document.getElementById("organizerPinInput").addEventListener("change", (e) => { setOrganizerPin(e.target.value); e.target.value = ""; });
 document.getElementById("organizerNameInput").addEventListener("change", (e) => eventRef.child("organizerName").set(e.target.value.trim()));
 document.getElementById("organizerEmailInput").addEventListener("change", (e) => eventRef.child("organizerEmail").set(e.target.value.trim()));
 document.getElementById("tournamentCostInput").addEventListener("change", (e) => {
@@ -861,10 +913,11 @@ document.getElementById("tournamentCostInput").addEventListener("change", (e) =>
   eventRef.child("tournamentCost").set(v ? (v.startsWith("$") ? v : "$" + v) : "");
 });
 document.getElementById("paymentEmailInput").addEventListener("change", (e) => eventRef.child("paymentEmail").set(e.target.value.trim()));
-document.getElementById("nextRoundBtn").addEventListener("click", () => { viewedRoundKey = null; nextRound(); });
-document.getElementById("resetTournamentBtn").addEventListener("click", () => {
+document.getElementById("nextRoundBtn").addEventListener("click", organizerOnly(() => { viewedRoundKey = null; nextRound(); }));
+document.getElementById("resetTournamentBtn").addEventListener("click", organizerOnly(() => {
   if (confirm("Reset the tournament? This clears all rounds and results.")) resetTournament();
-});
+}));
+document.getElementById("deleteEventBtn").addEventListener("click", organizerOnly(deleteEvent));
 
 document.getElementById("addBulkBtn").addEventListener("click", () => {
   const ta = document.getElementById("bulkCardsInput");
@@ -878,10 +931,15 @@ document.getElementById("addSingleBtn").addEventListener("click", () => {
 document.getElementById("singleCardInput").addEventListener("keydown", (e) => {
   if (e.key === "Enter") { addSingleCard(e.target.value); e.target.value = ""; }
 });
-document.getElementById("beginDraftBtn").addEventListener("click", beginDraft);
-document.getElementById("undoPickBtn").addEventListener("click", undoLastPick);
-document.getElementById("restartDraftBtn").addEventListener("click", () => {
+document.getElementById("beginDraftBtn").addEventListener("click", organizerOnly(beginDraft));
+document.getElementById("undoPickBtn").addEventListener("click", organizerOnly(undoLastPick));
+document.getElementById("restartDraftBtn").addEventListener("click", organizerOnly(() => {
   if (confirm("Restart the prize draft? This clears all picks.")) resetPrizeDraft();
+}));
+document.getElementById("pickEmailsToggle").addEventListener("change", async (e) => {
+  const on = e.target.checked;
+  if (!(await requireOrganizer())) { e.target.checked = !on; return; }
+  eventRef.child("pickEmailsOff").set(on ? null : true);
 });
 
 document.querySelectorAll(".tab").forEach((tab) => {
@@ -896,9 +954,10 @@ document.getElementById("app").addEventListener("click", (e) => {
   const dp = e.target.closest("[data-drop-player]");
   if (dp) {
     const id = dp.dataset.dropPlayer;
-    if (isDropped(id)) return setDropped(id, false);
-    if (confirm(`Drop ${nameOf(id)}? They keep their results so far but won't be paired in future rounds. If they're in an unfinished match this round, record it as a 2-0 win for their opponent.`)) setDropped(id, true);
-    return;
+    return organizerOnly(() => {
+      if (isDropped(id)) return setDropped(id, false);
+      if (confirm(`Drop ${nameOf(id)}? They keep their results so far but won't be paired in future rounds. If they're in an unfinished match this round, record it as a 2-0 win for their opponent.`)) setDropped(id, true);
+    })();
   }
 
   const vr = e.target.closest("[data-view-round]");
@@ -911,7 +970,7 @@ document.getElementById("app").addEventListener("click", (e) => {
   if (rc) return removeCard(rc.dataset.removeCard);
 
   const cp = e.target.id === "clearPoolBtn" ? true : e.target.closest("#clearPoolBtn");
-  if (cp) { if (confirm("Remove all cards from the prize pool?")) clearPool(); return; }
+  if (cp) return organizerOnly(() => { if (confirm("Remove all cards from the prize pool?")) clearPool(); })();
 
   const cc = e.target.closest("[data-claim]");
   if (cc) return claimCard(cc.dataset.claim);
