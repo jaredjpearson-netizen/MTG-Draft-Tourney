@@ -6,7 +6,7 @@
 <title>Magic Draft Tourney</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23152C26'/%3E%3Cpath d='M32 9 L38 26 L55 32 L38 38 L32 55 L26 38 L9 32 L26 26 Z' fill='%23E4C24C'/%3E%3C/svg%3E" />
 <!-- Bump the ?v= numbers below whenever styles.css or app.js change, so browsers fetch the new files instead of a cached copy. -->
-<link rel="stylesheet" href="styles.css?v=5" />
+<link rel="stylesheet" href="styles.css?v=6" />
 </head>
 <body>
 
@@ -188,6 +188,11 @@
             <button class="btn wine small" id="restartDraftBtn">↺ Restart draft</button>
           </div>
         </div>
+        <div class="who-am-i" id="whoAmIRow">
+          <label for="whoAmISelect">You are</label>
+          <select id="whoAmISelect"></select>
+          <span class="who-hint">Only the player whose turn it is can pick, from their own browser.</span>
+        </div>
         <div class="picker-banner" id="pickerBanner" style="display:none;"></div>
         <div class="sort-bar" id="prizeSortBar">
           <span>Sort by</span>
@@ -226,6 +231,6 @@
 <script src="firebase-config.js"></script>
 <script src="emailjs-prizedraft-config.js"></script>
 <script src="emailjs-start-config.js"></script>
-<script src="app.js?v=5"></script>
+<script src="app.js?v=6"></script>
 </body>
 </html>
