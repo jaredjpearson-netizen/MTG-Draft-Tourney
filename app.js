@@ -16,7 +16,9 @@ let activeTab = "players";
 let usdToCad = null;       // exchange rate for card prices, loaded once per page load
 let usdToCadApprox = false;
 let editingPlayerId = null; // player whose name/email is being edited on this device
-let viewedRoundKey = null; // a past round being looked back at on the Tournament tab; null = current round
+let viewedRoundKey = null;
+let editingPairings = false; // organizer is swapping players in the current round (this device only)
+let swapPick = null;         // first player tapped while editing pairings: { matchId, side } // a past round being looked back at on the Tournament tab; null = current round
 
 /* ---------------------------------------------------------
    Join / create event
@@ -895,15 +897,15 @@ function renderTournament() {
       if (m.bye) {
         matchesList.appendChild(el(`
           <div class="match-row">
-            <span class="pname">${esc(nameOf(m.p1))} ${trophy()}</span>
+            ${editingPairings ? swapNameHTML(m, "p1") : `<span class="pname">${esc(nameOf(m.p1))} ${trophy()}</span>`}
             <span style="font-size:12.5px;color:var(--ink-soft);font-style:italic;">bye — automatic win</span>
           </div>`));
       } else {
         const p1w = m.p1Wins || 0, p2w = m.p2Wins || 0;
         matchesList.appendChild(el(`
           <div class="match-row">
-            <span class="pname" style="grid-column:1;grid-row:1;">${esc(nameOf(m.p1))}${matchWinner(m) === m.p1 ? " " + trophy() : ""}</span>
-            <span class="pname right" style="grid-column:3;grid-row:1;">${matchWinner(m) === m.p2 ? trophy() + " " : ""}${esc(nameOf(m.p2))}</span>
+            ${editingPairings ? swapNameHTML(m, "p1") : `<span class="pname" style="grid-column:1;grid-row:1;">${esc(nameOf(m.p1))}${matchWinner(m) === m.p1 ? " " + trophy() : ""}</span>`}
+            ${editingPairings ? swapNameHTML(m, "p2") : `<span class="pname right" style="grid-column:3;grid-row:1;">${matchWinner(m) === m.p2 ? trophy() + " " : ""}${esc(nameOf(m.p2))}</span>`}
             <div class="games-stepper" style="grid-column:1;grid-row:2;justify-self:start;">
               <button class="icon-btn" data-game="${last.key}|${m.id}|p1|-1" ${p1w <= 0 ? "disabled" : ""}>−</button>
               <span class="games-count ${p1w > p2w ? "ahead" : ""}">${p1w}</span>
@@ -919,6 +921,15 @@ function renderTournament() {
       }
     });
   }
+  if (done || viewed) { editingPairings = false; swapPick = null; }
+  const editBtn = document.getElementById("editPairingsBtn");
+  editBtn.style.display = done ? "none" : "inline-block";
+  editBtn.textContent = editingPairings ? "✓ Done editing" : "✎ Edit pairings";
+  if (editingPairings) {
+    document.getElementById("roundSub").textContent = swapPick
+      ? `Now tap the player to swap with ${nameOf(lastMatchPlayer(last, swapPick))}.`
+      : "Tap two players to swap them. Only matches with no games recorded can change.";
+  }
   document.getElementById("nextRoundBtn").style.display = done ? "none" : "inline-block";
   document.getElementById("nextRoundBtn").disabled = !complete;
   document.getElementById("nextRoundBtn").textContent = rounds.length === 0 ? "Generate round 1" : "Generate next round";
@@ -932,6 +943,35 @@ function renderTournament() {
         <span class="pts">${s.wins}-${s.losses}${s.draws ? "-" + s.draws : ""} · ${s.points} pts</span>
       </div>`));
   });
+}
+
+// Edit-pairings mode: a player's name becomes a tappable chip when their
+// match has no games recorded yet (byes included), otherwise it's locked.
+function matchUnscored(m) { return m.bye || ((m.p1Wins || 0) + (m.p2Wins || 0)) === 0; }
+function lastMatchPlayer(round, pick) {
+  const m = round && round.matches.find((x) => x.id === pick.matchId);
+  return m ? m[pick.side] : null;
+}
+function swapNameHTML(m, side) {
+  const right = side === "p2" ? "right" : "";
+  const pos = m.bye ? "" : `style="grid-column:${side === "p1" ? 1 : 3};grid-row:1;justify-self:${side === "p1" ? "start" : "end"};"`;
+  if (!matchUnscored(m)) return `<span class="pname ${right}" ${pos}>${esc(nameOf(m[side]))} 🔒</span>`;
+  const picked = swapPick && swapPick.matchId === m.id && swapPick.side === side;
+  return `<button class="swap-chip ${picked ? "picked" : ""}" ${pos} data-swap="${m.id}|${side}">${esc(nameOf(m[side]))}</button>`;
+}
+function handleSwapTap(matchId, side) {
+  const roundKey = roundKeys()[roundKeys().length - 1];
+  if (!swapPick) { swapPick = { matchId, side }; return render(); }
+  if (swapPick.matchId === matchId) { swapPick = null; return render(); } // same match: cancel
+  const matches = (state.rounds[roundKey] || {}).matches || {};
+  const a = matches[swapPick.matchId], b = matches[matchId];
+  if (!a || !b || !matchUnscored(a) || !matchUnscored(b)) { swapPick = null; return render(); }
+  const base = "rounds/" + roundKey + "/matches/";
+  eventRef.update({
+    [base + swapPick.matchId + "/" + swapPick.side]: b[side],
+    [base + matchId + "/" + side]: a[swapPick.side],
+  });
+  swapPick = null;
 }
 
 function pastMatchRow(m) {
@@ -1125,6 +1165,10 @@ document.getElementById("tournamentCostInput").addEventListener("change", (e) =>
 });
 document.getElementById("paymentEmailInput").addEventListener("change", (e) => eventRef.child("paymentEmail").set(e.target.value.trim()));
 document.getElementById("nextRoundBtn").addEventListener("click", organizerOnly(() => { viewedRoundKey = null; nextRound(); }));
+document.getElementById("editPairingsBtn").addEventListener("click", async () => {
+  if (!editingPairings && !(await requireOrganizer())) return;
+  editingPairings = !editingPairings; swapPick = null; render();
+});
 document.getElementById("resetTournamentBtn").addEventListener("click", organizerOnly(() => {
   if (confirm("Reset the tournament? This clears all rounds and results.")) resetTournament();
 }));
@@ -1186,6 +1230,9 @@ document.getElementById("app").addEventListener("click", (e) => {
       if (confirm(`Drop ${nameOf(id)}? They keep their results so far but won't be paired in future rounds. If they're in an unfinished match this round, record it as a 2-0 win for their opponent.`)) setDropped(id, true);
     })();
   }
+
+  const sw = e.target.closest("[data-swap]");
+  if (sw) { const [mid, side] = sw.dataset.swap.split("|"); return handleSwapTap(mid, side); }
 
   const vr = e.target.closest("[data-view-round]");
   if (vr) { viewedRoundKey = vr.dataset.viewRound || null; return render(); }
