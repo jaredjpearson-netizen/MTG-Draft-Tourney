@@ -4,6 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Magic Draft Tourney</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23152C26'/%3E%3Cpath d='M32 9 L38 26 L55 32 L38 38 L32 55 L26 38 L9 32 L26 26 Z' fill='%23E4C24C'/%3E%3C/svg%3E" />
 <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -15,6 +16,30 @@
   <input id="joinCodeInput" type="text" maxlength="8" placeholder="EVENT CODE (e.g. FOIL42)" />
   <div class="row">
     <button class="btn" id="joinBtn" style="flex:1">Join / create event</button>
+  </div>
+  <button class="link-btn" id="manageBtn">⚙ Manage tournaments</button>
+</div>
+
+<!-- Manage tournaments (master password) -->
+<div id="manageScreen" style="display:none">
+  <div class="manage-head">
+    <h1>Manage tournaments</h1>
+    <button class="link-btn" id="manageBackBtn">← Back</button>
+  </div>
+  <div id="manageLogin">
+    <p>Enter the master password to see every tournament.</p>
+    <div class="row">
+      <input id="masterPasswordInput" type="password" autocomplete="current-password" placeholder="Master password" />
+      <button class="btn" id="masterLoginBtn">Unlock</button>
+    </div>
+    <p class="manage-error" id="manageError"></p>
+  </div>
+  <div id="manageList" style="display:none">
+    <div class="manage-toolbar">
+      <span id="manageCount"></span>
+      <button class="link-btn" id="manageSignOutBtn">Lock</button>
+    </div>
+    <div id="eventsList"></div>
   </div>
 </div>
 
@@ -82,6 +107,11 @@
           <label>Payment info (e.g. Interac/Paypal email)</label>
           <input type="email" id="paymentEmailInput" placeholder="you@example.com" />
         </div>
+        <div class="field-block">
+          <label>Organizer PIN</label>
+          <input type="password" id="organizerPinInput" inputmode="numeric" autocomplete="off" style="max-width:260px;" />
+          <p style="font-size:12px;color:var(--ink-soft);margin:5px 0 0;">If set, generating rounds, resets, editing or dropping players and the prize draft controls ask for it. Score entry and picking prizes stay open to everyone.</p>
+        </div>
         <p style="font-size:12.5px;color:var(--ink-soft);margin:-6px 0 16px;">
           Starting the tournament sends a welcome email to all players.
         </p>
@@ -121,9 +151,13 @@
 
     <!-- PRIZE DRAFT TAB -->
     <div class="tab-page" id="page-prizes">
+      <label class="toggle-row">
+        <input type="checkbox" id="pickEmailsToggle" checked />
+        Email each player when it's their turn to pick
+      </label>
       <div id="prizeSetupView">
         <h2 class="section-title">Prize pool</h2>
-        <p class="section-sub">Bulk-add one card per line, or drop them in one at a time. Draft order follows the tournament ranking, top to bottom, looping back to the top until every card is claimed.</p>
+        <p class="section-sub">Bulk-add one card per line, or drop them in one at a time. Prices are Scryfall market prices converted to Canadian dollars. Tap a price to type your own (useful for booster packs). Draft order follows the tournament ranking, top to bottom, looping back to the top until every card is claimed.</p>
         <textarea id="bulkCardsInput" rows="4" placeholder="Sheoldred, the Apocalypse&#10;Ragavan, Nimble Pilferer&#10;Wrenn and Six"></textarea>
         <div class="field-row" style="margin-top:8px;">
           <button class="btn small" id="addBulkBtn">Add lines to pool</button>
@@ -136,6 +170,7 @@
         <div id="poolList" style="display:flex;flex-direction:column;gap:6px;max-height:220px;overflow-y:auto;margin-bottom:10px;"></div>
         <div class="field-row">
           <button class="btn small wine" id="retryImagesBtn" style="display:none;">🔄 Retry missing card images</button>
+          <button class="btn small" id="refreshPricesBtn">💲 Update prices</button>
         </div>
         <button class="btn" id="beginDraftBtn" style="margin-top:6px;">🏆 Start prize draft</button>
       </div>
@@ -166,6 +201,7 @@
 
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
 <script src="firebase-config.js"></script>
 <script src="emailjs-prizedraft-config.js"></script>

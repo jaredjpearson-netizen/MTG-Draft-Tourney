@@ -38,6 +38,7 @@ Back in Firebase console → **Realtime Database → Rules** tab, replace the ru
 {
   "rules": {
     "events": {
+      ".read": "auth != null && auth.token.email === 'mtgdrafttourneybot@gmail.com'",
       "$eventCode": {
         ".read": true,
         ".write": true
@@ -47,11 +48,35 @@ Back in Firebase console → **Realtime Database → Rules** tab, replace the ru
 }
 ```
 
+The extra `".read"` line lets only the admin account list every tournament
+(for **Manage tournaments**, below). Everyone else can still only open an
+event whose code they know.
+
 Click **Publish**. This means anyone who knows a specific event code can read and
 write that event's data — fine for a casual home tournament (there's no login), but
 worth knowing: don't use a guessable code for anything you'd mind a stranger poking
-at, and the app itself has no admin/player distinction — anyone with the link can
-record results or claim prize cards.
+at. Anyone with the link can record results or claim prize cards. The optional
+organizer PIN (see Notes) guards the bigger actions, but it's a speed bump
+against accidents rather than real security.
+
+## 2b. Manage tournaments: one-time setup
+
+The master password is the password of a Firebase sign-in account, so it's
+checked by Firebase and never appears in the app's code (which is public on
+GitHub).
+
+1. Firebase console → **Build → Authentication** → **Get started** (if
+   you haven't used it yet) → **Sign-in method** tab → enable
+   **Email/Password** → Save.
+2. **Users** tab → **Add user**. Email: `mtgdrafttourneybot@gmail.com`,
+   password: your master password → **Add user**.
+3. **Settings** tab → **Authorized domains** → make sure your GitHub Pages
+   domain (e.g. `jaredjpearson-netizen.github.io`) is listed. Add it if not.
+4. Update the database rules to the version in step 2 above and **Publish**.
+
+To change the master password later, use the user's **⋮ → Reset password**
+in the Users tab. The admin email lives in `firebase-config.js`
+(`adminEmail`) if you ever want a different account.
 
 ## 3. Email setup — already configured
 
@@ -134,16 +159,43 @@ hosted.)
   place — not a snake order.
 - Player email addresses are required when adding a player, since the app
   relies on them for both notification emails.
-- Hover (or tap-and-hold on mobile) over any card's art anywhere in the app
-  to see a full-size preview.
+- Hover over any card's art anywhere in the app to see a full-size preview.
+  On phones and tablets, tap the art instead (in the prize draft, tap the 🔍
+  on a card, since tapping the card itself picks it). Tap again to close.
+- Swiss pairing avoids rematches: if a straightforward pairing would leave two
+  players who've already met, it reshuffles until no one repeats an opponent
+  (a rematch only happens when there's truly no other option). In round 1 an
+  odd player out gets a bye at random.
+- Once the tournament is running, the Tournament tab has round buttons to look
+  back at any earlier round's matchups and scores.
+- To drop a player mid-tournament, use **Drop** next to their name on the
+  Players tab. They keep their results so far but aren't paired again. If
+  they leave partway through a match, record it as 2-0 for their opponent.
 - Card art comes from Scryfall automatically. Entries that aren't real card
   names (booster packs, box toppers, "mystery prize", etc.) just show a
   generic placeholder and aren't flagged as a problem. If a genuine card's
   art fails to load (rare — usually a rate-limit hiccup on a big bulk-add),
   a "Retry missing card images" button appears in Prize pool setup to
   re-fetch just those.
-- Data isn't automatically deleted — old events just sit in your database (free
-  tier is generous, this won't cost anything for normal use). You can delete old
-  event nodes manually in the Firebase console under **Realtime Database → Data**
-  if you want to tidy up.
+- **Organizer PIN** (optional, set in Tournament setup): once set, generating
+  rounds, resetting, editing or dropping players, starting/undoing/restarting the prize
+  draft, clearing the prize pool and the pick-email switch all ask for it. Score entry and picking prizes stay open to everyone. Each
+  device only has to enter it once. To change it, type a new PIN in the same
+  field (you'll be asked for the current one first if this device hasn't
+  entered it yet).
+- **Editing players**: the ✎ next to a player's name (Players tab) edits their
+  name or email at any time, before or during the tournament.
+- **Card prices** come from Scryfall's market price (USD, for the card's
+  default printing, so it may differ from your exact copy) converted to
+  Canadian dollars at the day's exchange rate. The pool, the draft and each
+  player's haul show totals. Tap a price in the prize pool list to type your
+  own, e.g. for booster packs, which Scryfall can't price. **Update prices**
+  re-checks every card.
+- **Pick emails switch**: the checkbox at the top of the Prize draft tab turns
+  the "your turn to pick" emails on or off, which saves most of the EmailJS
+  monthly quota (200 emails/month) when everyone's in the same room.
+- **Manage tournaments** (link on the start screen) lists every tournament,
+  newest first, with its status. You can open or delete any of them. It's
+  locked by the master password (see setup below). Each event is tiny, so
+  the free tier won't fill up in normal use even if you never delete any.
 - To run a second, unrelated event later, just use a different event code.

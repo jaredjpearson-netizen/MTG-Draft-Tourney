@@ -13,6 +13,9 @@ let eventCode = null;
 let eventRef = null;
 let state = {}; // live mirror of the event's DB node
 let activeTab = "players";
+let usdToCad = null;       // exchange rate for card prices, loaded once per page load
+let usdToCadApprox = false;
+let editingPlayerId = null; // player whose name/email is being edited on this device
 let viewedRoundKey = null; // a past round being looked back at on the Tournament tab; null = current round
 
 /* ---------------------------------------------------------
@@ -60,6 +63,7 @@ function openEvent(code) {
     if (!snap.exists()) {
       eventRef.set({
         eventName: eventCode,
+        createdAt: Date.now(),
         players: {},
         totalRounds: 3,
         started: false,
@@ -72,7 +76,12 @@ function openEvent(code) {
   });
 
   let initialTabSet = false;
+  let hadData = false;
+  const thisRef = eventRef;
   eventRef.on("value", (snap) => {
+    if (eventRef !== thisRef) return; // we've already left this event
+    if (hadData && !snap.exists()) { leaveEvent(); alert("This event was deleted by the organizer."); return; }
+    if (snap.exists()) hadData = true;
     state = snap.val() || {};
     if (!initialTabSet) { activeTab = computeDefaultTab(); initialTabSet = true; }
     joinScreen.style.display = "none";
@@ -88,7 +97,8 @@ function openEvent(code) {
 document.getElementById("joinBtn").addEventListener("click", () => openEvent(joinCodeInput.value));
 joinCodeInput.addEventListener("keydown", (e) => { if (e.key === "Enter") openEvent(joinCodeInput.value); });
 
-document.getElementById("codeBadge").addEventListener("click", () => {
+document.getElementById("codeBadge").addEventListener("click", () => leaveEvent());
+function leaveEvent() {
   if (eventRef) eventRef.off();
   eventCode = null; eventRef = null; state = {};
   const url = new URL(window.location.href);
@@ -97,6 +107,109 @@ document.getElementById("codeBadge").addEventListener("click", () => {
   appRoot.style.display = "none";
   joinScreen.style.display = "block";
   joinCodeInput.value = "";
+}
+
+/* ---------------------------------------------------------
+   Manage tournaments (start screen)
+   Listing every event needs read access to the whole "events" node, which
+   the database rules only give to the signed-in admin account (adminEmail
+   in firebase-config.js). The master password is that account's password,
+   checked by Firebase, so it never appears in this code.
+--------------------------------------------------------- */
+const auth = firebase.auth ? firebase.auth() : null;
+const manageScreen = document.getElementById("manageScreen");
+const manageError = document.getElementById("manageError");
+
+function showManage() {
+  joinScreen.style.display = "none";
+  manageScreen.style.display = "block";
+  manageError.textContent = "";
+  if (auth && auth.currentUser) loadAllEvents();
+  else {
+    document.getElementById("manageLogin").style.display = "block";
+    document.getElementById("manageList").style.display = "none";
+    document.getElementById("masterPasswordInput").focus();
+  }
+}
+function hideManage() {
+  manageScreen.style.display = "none";
+  joinScreen.style.display = "block";
+}
+async function masterLogin() {
+  const input = document.getElementById("masterPasswordInput");
+  manageError.textContent = "";
+  if (!auth) { manageError.textContent = "Sign-in didn't load. Check your connection and refresh."; return; }
+  try {
+    await auth.signInWithEmailAndPassword(adminEmail, input.value);
+    input.value = "";
+    loadAllEvents();
+  } catch (err) {
+    console.error("[MTG draft] Master sign-in failed:", err);
+    manageError.textContent = /wrong-password|invalid-credential|invalid-login/.test(err.code || "")
+      ? "That password isn't right."
+      : "Couldn't sign in (" + (err.code || err.message) + "). Check the Manage tournaments setup in the README.";
+  }
+}
+function lastActivity(ev) {
+  let t = ev.createdAt || 0;
+  const bump = (obj, field) => Object.values(obj || {}).forEach((x) => { if (x && x[field] > t) t = x[field]; });
+  bump(ev.players, "addedAt"); bump(ev.prizePool, "addedAt"); bump(ev.claims, "ts");
+  return t;
+}
+function eventStatus(ev) {
+  const rounds = Object.keys(ev.rounds || {}).length;
+  const pool = Object.keys(ev.prizePool || {}).length;
+  const claims = Object.keys(ev.claims || {}).length;
+  if (ev.draftStarted) return claims >= pool ? "Prize draft finished" : "Prize draft in progress";
+  if (ev.started) return `Round ${rounds} of ${ev.totalRounds || 3}`;
+  return "Not started";
+}
+async function loadAllEvents() {
+  document.getElementById("manageLogin").style.display = "none";
+  document.getElementById("manageList").style.display = "block";
+  const list = document.getElementById("eventsList");
+  list.innerHTML = `<p class="manage-empty">Loading…</p>`;
+  let all;
+  try {
+    all = (await db.ref("events").once("value")).val() || {};
+  } catch (err) {
+    console.error("[MTG draft] Couldn't list events:", err);
+    list.innerHTML = `<p class="manage-error">The database wouldn't list the tournaments. The Firebase rules probably need the update described in the README under "Manage tournaments".</p>`;
+    return;
+  }
+  const events = Object.entries(all).map(([code, ev]) => ({ code, ev, last: lastActivity(ev) })).sort((a, b) => b.last - a.last);
+  document.getElementById("manageCount").textContent = `${events.length} tournament${events.length === 1 ? "" : "s"}`;
+  list.innerHTML = events.length ? "" : `<p class="manage-empty">No tournaments yet.</p>`;
+  events.forEach(({ code, ev, last }) => {
+    const players = Object.keys(ev.players || {}).length;
+    list.appendChild(el(`
+      <div class="event-row">
+        <div class="event-info">
+          <div class="event-name">${esc(ev.eventName || code)} <span class="event-code">${esc(code)}</span></div>
+          <div class="event-meta">${players} player${players === 1 ? "" : "s"} · ${eventStatus(ev)}${last ? " · " + new Date(last).toLocaleDateString() : ""}</div>
+        </div>
+        <div class="event-actions">
+          <button class="btn small" data-open-event="${esc(code)}">Open</button>
+          <button class="btn small wine" data-delete-event="${esc(code)}">🗑 Delete</button>
+        </div>
+      </div>`));
+  });
+}
+document.getElementById("manageBtn").addEventListener("click", showManage);
+document.getElementById("manageBackBtn").addEventListener("click", hideManage);
+document.getElementById("masterLoginBtn").addEventListener("click", masterLogin);
+document.getElementById("masterPasswordInput").addEventListener("keydown", (e) => { if (e.key === "Enter") masterLogin(); });
+document.getElementById("manageSignOutBtn").addEventListener("click", async () => { if (auth) await auth.signOut(); showManage(); });
+document.getElementById("eventsList").addEventListener("click", async (e) => {
+  const open = e.target.closest("[data-open-event]");
+  if (open) { manageScreen.style.display = "none"; return openEvent(open.dataset.openEvent); }
+  const del = e.target.closest("[data-delete-event]");
+  if (del) {
+    const code = del.dataset.deleteEvent;
+    if (!confirm(`Delete tournament ${code} for everyone? This removes all its players, results and prizes, and can't be undone.`)) return;
+    await db.ref("events/" + code).remove();
+    loadAllEvents();
+  }
 });
 
 // auto-join if ?event=CODE is in the URL
@@ -105,6 +218,42 @@ document.getElementById("codeBadge").addEventListener("click", () => {
   const code = url.searchParams.get("event");
   if (code) openEvent(code);
 })();
+
+/* ---------------------------------------------------------
+   Organizer PIN
+   An optional PIN that guards the big actions (generating rounds, resets,
+   drops, starting/undoing the prize draft, deleting the event). It's a
+   speed bump against accidents and casual meddling, not real security:
+   only a hash is stored, but the database itself is still open. Once
+   entered correctly on a device, that device isn't asked again.
+--------------------------------------------------------- */
+async function hashPin(pin) {
+  const data = new TextEncoder().encode(eventCode + ":" + pin);
+  const buf = await crypto.subtle.digest("SHA-256", data);
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+function unlockKey() { return "mtg-organizer-" + eventCode; }
+async function requireOrganizer() {
+  if (!state.organizerPinHash) return true;
+  try { if (localStorage.getItem(unlockKey()) === state.organizerPinHash) return true; } catch (e) {}
+  const pin = prompt("Enter the organizer PIN to do this.");
+  if (pin === null) return false;
+  if ((await hashPin(pin.trim())) !== state.organizerPinHash) { alert("That PIN isn't right."); return false; }
+  try { localStorage.setItem(unlockKey(), state.organizerPinHash); } catch (e) {}
+  return true;
+}
+// Wraps an action so it only runs once the organizer PIN (if any) checks out.
+function organizerOnly(fn) {
+  return async (...args) => { if (await requireOrganizer()) fn(...args); };
+}
+async function setOrganizerPin(pin) {
+  pin = (pin || "").trim();
+  if (!(await requireOrganizer())) return;
+  const hash = pin ? await hashPin(pin) : null;
+  eventRef.child("organizerPinHash").set(hash);
+  try { if (hash) localStorage.setItem(unlockKey(), hash); } catch (e) {}
+}
+
 
 /* ---------------------------------------------------------
    Helpers: pull arrays out of the Firebase object shape
@@ -139,7 +288,7 @@ function computeStandings() {
   const stats = {};
   players.forEach((p) => {
     stats[p.id] = {
-      id: p.id, name: p.name, points: 0, wins: 0, losses: 0, draws: 0, byes: 0,
+      id: p.id, name: p.name, dropped: !!p.dropped, points: 0, wins: 0, losses: 0, draws: 0, byes: 0,
       matchesPlayed: 0, gamesWon: 0, gamesLost: 0, opponents: [],
     };
   });
@@ -209,7 +358,10 @@ function generateRound1Pairings() {
   const pool = playersArray().map((p) => p.id);
   const matches = [];
   if (pool.length % 2 === 1) {
-    matches.push({ p1: pool.pop(), p2: null, bye: true });
+    // Everyone's tied, so the bye goes to a random player rather than
+    // always the last seat.
+    const [byeId] = pool.splice(Math.floor(Math.random() * pool.length), 1);
+    matches.push({ p1: byeId, p2: null, bye: true });
   }
   const half = pool.length / 2;
   const top = pool.slice(0, half);
@@ -227,7 +379,7 @@ function generateRound1Pairings() {
 // option. A rematch is only allowed when no rematch-free pairing exists.
 function generateSwissPairings(rounds) {
   const standings = computeStandings(); // already sorted: points, then OMW%/GW%/OGW% tiebreakers
-  const ids = standings.map((s) => s.id);
+  const ids = standings.map((s) => s.id).filter((id) => !isDropped(id));
 
   // Bye candidates: lowest-ranked player who hasn't had one comes first.
   // Everyone else (if all have had one) follows, still bottom-up.
@@ -281,6 +433,18 @@ function addPlayer(name, email) {
   eventRef.child("players/" + key).set({ name, email, addedAt: Date.now() });
 }
 function removePlayer(id) { if (!state.started) eventRef.child("players/" + id).remove(); }
+// Dropping keeps a player's past results (they still count for standings and
+// opponents' tiebreakers) but leaves them out of every future round.
+function savePlayerEdit(id, name, email) {
+  name = (name || "").trim();
+  email = (email || "").trim();
+  if (!name || !email) { alert("Please enter both a player name and an email address."); return false; }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { alert("That doesn't look like a valid email address — please double check it."); return false; }
+  eventRef.child("players/" + id).update({ name, email });
+  return true;
+}
+function setDropped(id, dropped) { if (state.started) eventRef.child("players/" + id + "/dropped").set(dropped ? true : null); }
+function isDropped(id) { return !!((state.players || {})[id] || {}).dropped; }
 
 function setTotalRounds(n) { eventRef.child("totalRounds").set(Math.max(1, Math.min(9, n))); }
 
@@ -378,7 +542,11 @@ async function fetchCardImage(name, attempt) {
     let url = null;
     if (data.image_uris && data.image_uris.normal) url = data.image_uris.normal;
     else if (data.card_faces && data.card_faces[0] && data.card_faces[0].image_uris) url = data.card_faces[0].image_uris.normal;
-    return { url, notACard: !url };
+    // Scryfall's prices are USD market prices for the default printing;
+    // fall back to the foil/etched price for cards that only exist that way.
+    const p = data.prices || {};
+    const usd = parseFloat(p.usd || p.usd_foil || p.usd_etched);
+    return { url, notACard: !url, priceUsd: isNaN(usd) ? null : usd };
   } catch (e) {
     if (attempt < 2) { await sleep(600); return fetchCardImage(name, attempt + 1); }
     return { url: null, notACard: false };
@@ -386,6 +554,7 @@ async function fetchCardImage(name, attempt) {
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 function statusFor(result) { return result.url ? "found" : result.notACard ? "not_a_card" : "none"; }
+function cardFields(result) { return { imageUrl: result.url, imageStatus: statusFor(result), priceUsd: result.priceUsd ?? null }; }
 
 async function addBulkCards(text) {
   const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
@@ -398,7 +567,7 @@ async function addBulkCards(text) {
   // one at a time in the background rather than all at once.
   for (const e2 of entries) {
     const result = await fetchCardImage(e2.name);
-    eventRef.child("prizePool/" + e2.key).update({ imageUrl: result.url, imageStatus: statusFor(result) });
+    eventRef.child("prizePool/" + e2.key).update(cardFields(result));
     await sleep(180);
   }
 }
@@ -408,7 +577,7 @@ async function addSingleCard(name) {
   const key = newKey("events/" + eventCode + "/prizePool");
   eventRef.child("prizePool/" + key).set({ name, addedAt: Date.now(), imageStatus: "loading" });
   const result = await fetchCardImage(name);
-  eventRef.child("prizePool/" + key).update({ imageUrl: result.url, imageStatus: statusFor(result) });
+  eventRef.child("prizePool/" + key).update(cardFields(result));
 }
 async function retryMissingImages() {
   const pool = state.prizePool || {};
@@ -418,10 +587,64 @@ async function retryMissingImages() {
   for (const [id, c] of missing) {
     eventRef.child("prizePool/" + id + "/imageStatus").set("loading");
     const result = await fetchCardImage(c.name);
-    eventRef.child("prizePool/" + id).update({ imageUrl: result.url, imageStatus: statusFor(result) });
+    eventRef.child("prizePool/" + id).update(cardFields(result));
     await sleep(180);
   }
 }
+// Re-checks Scryfall prices for every real card in the pool (also fills in
+// prices for cards added before prices existed). Hand-entered prices win.
+async function refreshPrices() {
+  const pool = state.prizePool || {};
+  const cards = Object.entries(pool).filter(([, c]) => c.imageStatus !== "not_a_card");
+  for (const [id, c] of cards) {
+    const result = await fetchCardImage(c.name);
+    if (result.url || result.priceUsd != null) eventRef.child("prizePool/" + id).update(cardFields(result));
+    await sleep(180);
+  }
+}
+function setManualPrice(id) {
+  const c = (state.prizePool || {})[id];
+  if (!c) return;
+  const current = c.priceCad != null ? c.priceCad.toFixed(2) : "";
+  const input = prompt(`Price for "${c.name}" in CAD. Leave blank to use the Scryfall price.`, current);
+  if (input === null) return;
+  const v = parseFloat(input.replace(/[$,\s]/g, ""));
+  eventRef.child("prizePool/" + id + "/priceCad").set(input.trim() === "" || isNaN(v) ? null : Math.round(v * 100) / 100);
+}
+
+/* USD -> CAD. Fetched once per page load from free, keyless exchange-rate
+   APIs. If both are unreachable we fall back to a rough fixed rate and say so. */
+(async function loadExchangeRate() {
+  const sources = [
+    ["https://api.frankfurter.app/latest?from=USD&to=CAD", (d) => d.rates && d.rates.CAD],
+    ["https://open.er-api.com/v6/latest/USD", (d) => d.rates && d.rates.CAD],
+  ];
+  for (const [url, pick] of sources) {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) continue;
+      const rate = pick(await res.json());
+      if (rate) { usdToCad = rate; console.log("[MTG draft] USD→CAD rate:", rate); if (eventRef) render(); return; }
+    } catch (e) {}
+  }
+  usdToCad = 1.38; usdToCadApprox = true;
+  console.log("[MTG draft] Couldn't load an exchange rate — using an approximate 1.38.");
+  if (eventRef) render();
+})();
+function cardCad(c) {
+  if (c.priceCad != null) return c.priceCad;
+  if (c.priceUsd != null && usdToCad) return c.priceUsd * usdToCad;
+  return null;
+}
+function money(v) { return "$" + v.toLocaleString("en-CA", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+function poolTotalHTML(cards) {
+  const priced = cards.map(cardCad).filter((v) => v != null);
+  const unpriced = cards.length - priced.length;
+  const total = priced.reduce((a, b) => a + b, 0);
+  return `Total value: <b>${money(total)} CAD</b>${usdToCadApprox ? " (approx. rate)" : ""}` +
+    (unpriced ? ` · ${unpriced} item${unpriced === 1 ? "" : "s"} without a price` : "");
+}
+
 function removeCard(id) { if (!state.draftStarted) eventRef.child("prizePool/" + id).remove(); }
 function clearPool() { if (!state.draftStarted) eventRef.child("prizePool").remove(); }
 
@@ -480,6 +703,7 @@ function sendPickEmail(player) {
 // the same event, only one of them actually sends the email for a given pick.
 function notifyCurrentPickerIfNeeded() {
   if (!state.draftStarted) return;
+  if (state.pickEmailsOff) return; // organizer turned turn emails off (e.g. everyone's in the room)
   if (!emailjsReady) { console.log("[MTG draft] EmailJS not configured — skipping turn notification."); return; }
   const pool = state.prizePool || {};
   const claimsCount = Object.keys(state.claims || {}).length;
@@ -512,6 +736,18 @@ function cardVisualHTML(c, kind) {
   if (c.imageUrl) return `<div class="${cls}" data-preview="${esc(c.imageUrl)}"><img src="${c.imageUrl}" alt="${esc(c.name)}" loading="lazy" /></div>`;
   if (c.imageStatus === "loading") return `<div class="${cls} ph">⏳</div>`;
   return `<div class="${cls} ph">📦</div>`;
+}
+
+// editable: the setup pool list, where tapping the price lets you type one in
+// (handy for booster packs and other non-cards Scryfall can't price).
+function priceTagHTML(c, editable) {
+  const v = cardCad(c);
+  const text = v != null ? money(v) : editable ? "+ price" : "";
+  if (!text) return "";
+  const title = c.priceCad != null ? "Price entered by hand" : "Scryfall market price (converted to CAD)";
+  return editable
+    ? `<button class="price-tag edit ${v == null ? "empty" : ""}" data-set-price="${c.id}" title="${title}. Tap to change.">${text}</button>`
+    : `<span class="price-tag" title="${title}">${text}</span>`;
 }
 
 function render() {
@@ -549,24 +785,44 @@ function render() {
 function renderPlayers() {
   const players = playersArray();
   document.getElementById("playersSub").textContent = state.started
-    ? "Player list is locked once the tournament has started."
+    ? "No new players once the tournament has started. ✎ fixes a name or email; dropping a player keeps their results so far but leaves them out of future rounds."
     : "Add everyone who's drafting.";
   document.getElementById("addPlayerRow").style.display = state.started ? "none" : "flex";
 
   const list = document.getElementById("playersList");
+  // Keep whatever's been typed into an open edit form across live re-renders.
+  const draftName = document.getElementById("editNameInput")?.value;
+  const draftEmail = document.getElementById("editEmailInput")?.value;
+  if (editingPlayerId && !(state.players || {})[editingPlayerId]) editingPlayerId = null;
   list.innerHTML = "";
   if (players.length === 0) {
     list.appendChild(el(`<p style="color:var(--ink-soft);font-size:14px;">No players yet — add a name above to get started.</p>`));
     return;
   }
   players.forEach((p, i) => {
+    if (p.id === editingPlayerId) {
+      list.appendChild(el(`
+        <div class="list-item editing">
+          <input type="text" id="editNameInput" value="${esc(draftName ?? p.name)}" placeholder="Player name" />
+          <input type="email" id="editEmailInput" value="${esc(draftEmail ?? p.email ?? "")}" placeholder="Email address" />
+          <div style="display:flex;gap:6px;">
+            <button class="btn small" data-save-player="${p.id}">Save</button>
+            <button class="btn small wine" data-cancel-edit>Cancel</button>
+          </div>
+        </div>`));
+      return;
+    }
     const row = el(`
-      <div class="list-item" style="align-items:flex-start;">
+      <div class="list-item ${p.dropped ? "dropped" : ""}" style="align-items:flex-start;">
         <span>
-          <span style="color:var(--ink-soft);margin-right:6px;font-size:12.5px;">${i + 1}.</span>${esc(p.name)}
+          <span style="color:var(--ink-soft);margin-right:6px;font-size:12.5px;">${i + 1}.</span>${esc(p.name)}${p.dropped ? ` <span class="dropped-tag">dropped</span>` : ""}
           ${p.email ? `<div style="font-size:11.5px;color:var(--ink-soft);margin-top:2px;">${esc(p.email)}</div>` : ""}
         </span>
-        ${state.started ? "" : `<button class="x-btn" data-remove-player="${p.id}">✕</button>`}
+        <span style="display:flex;align-items:center;gap:4px;">
+          <button class="x-btn" data-edit-player="${p.id}" title="Edit name or email">✎</button>
+          ${!state.started ? `<button class="x-btn" data-remove-player="${p.id}">✕</button>`
+            : `<button class="drop-btn" data-drop-player="${p.id}">${p.dropped ? "Undo drop" : "Drop"}</button>`}
+        </span>
       </div>`);
     list.appendChild(row);
   });
@@ -586,6 +842,7 @@ function renderTournament() {
   if (document.activeElement !== orgEmailInput) orgEmailInput.value = state.organizerEmail || "";
   if (document.activeElement !== costInput) costInput.value = (state.tournamentCost || "").replace(/^\$/, "");
   if (document.activeElement !== payInput) payInput.value = state.paymentEmail || "";
+  document.getElementById("organizerPinInput").placeholder = state.organizerPinHash ? "PIN is set. Type a new one to change it." : "Optional, e.g. 4 digits";
 
   const running = !!state.started;
   document.getElementById("setupView").style.display = running ? "none" : "block";
@@ -664,7 +921,7 @@ function renderTournament() {
   computeStandings().forEach((s, i) => {
     standingsList.appendChild(el(`
       <div class="standing-row ${i === 0 ? "lead" : ""}">
-        <span style="color:var(--ink);"><span style="color:var(--ink-soft);margin-right:6px;">${i + 1}.</span>${esc(s.name)}</span>
+        <span style="color:var(--ink);"><span style="color:var(--ink-soft);margin-right:6px;">${i + 1}.</span>${esc(s.name)}${s.dropped ? ` <span class="dropped-tag">dropped</span>` : ""}</span>
         <span class="pts">${s.wins}-${s.losses}${s.draws ? "-" + s.draws : ""} · ${s.points} pts</span>
       </div>`));
   });
@@ -723,7 +980,7 @@ function renderResults() {
     wrap.appendChild(el(`
       <div class="results-table-row data ${i === 0 ? "lead" : ""}">
         <span style="color:var(--ink-soft);">${i + 1}</span>
-        <span>${esc(s.name)}</span>
+        <span>${esc(s.name)}${s.dropped ? ` <span class="dropped-tag">dropped</span>` : ""}</span>
         <span class="stat">${s.points}</span>
         <span class="stat">${pct(s.matchWinPct)}</span>
         <span class="stat">${pct(s.omw)}</span>
@@ -737,6 +994,7 @@ function renderPrizes() {
   const players = playersArray();
   const pool = Object.entries(state.prizePool || {}).map(([id, v]) => ({ id, ...v })).sort((a, b) => (a.addedAt || 0) - (b.addedAt || 0));
   const draftStarted = !!state.draftStarted;
+  document.getElementById("pickEmailsToggle").checked = !state.pickEmailsOff;
 
   document.getElementById("prizeSetupView").style.display = draftStarted ? "none" : "block";
   document.getElementById("prizeActiveView").style.display = draftStarted ? "block" : "none";
@@ -744,7 +1002,7 @@ function renderPrizes() {
   if (!draftStarted) {
     const header = document.getElementById("poolHeader");
     header.innerHTML = pool.length
-      ? `<span style="font-size:13px;color:var(--ink-soft);">${pool.length} card${pool.length === 1 ? "" : "s"} in the pool</span>
+      ? `<span style="font-size:13px;color:var(--ink-soft);">${pool.length} card${pool.length === 1 ? "" : "s"} in the pool · ${poolTotalHTML(pool)}</span>
          <button id="clearPoolBtn" style="background:none;border:none;color:var(--wine);font-size:12.5px;cursor:pointer;">Clear all</button>`
       : "";
     const poolList = document.getElementById("poolList");
@@ -756,7 +1014,10 @@ function renderPrizes() {
             ${cardVisualHTML(c, "thumb")}
             ${esc(c.name)}
           </span>
-          <button class="x-btn" data-remove-card="${c.id}">✕</button>
+          <span style="display:flex;align-items:center;gap:8px;">
+            ${priceTagHTML(c, true)}
+            <button class="x-btn" data-remove-card="${c.id}">✕</button>
+          </span>
         </div>`));
     });
 
@@ -776,7 +1037,8 @@ function renderPrizes() {
   const draftComplete = remaining.length === 0;
 
   document.getElementById("prizeTitle").textContent = draftComplete ? "Prize draft complete" : "Prize draft";
-  document.getElementById("prizeSub").textContent = draftComplete ? "Every card has a home." : `Pick ${claims.length + 1} · ${remaining.length} card${remaining.length === 1 ? "" : "s"} left`;
+  document.getElementById("prizeSub").innerHTML = (draftComplete ? "Every card has a home." : `Pick ${claims.length + 1} · ${remaining.length} card${remaining.length === 1 ? "" : "s"} left`) +
+    `<br>${poolTotalHTML(pool)}`;
   document.getElementById("undoPickBtn").disabled = claims.length === 0;
 
   const banner = document.getElementById("pickerBanner");
@@ -796,7 +1058,8 @@ function renderPrizes() {
       cardsGrid.appendChild(el(`
         <button class="card-tile" data-claim="${c.id}">
           ${cardVisualHTML(c, "tile")}
-          <div class="card-tile-name">${esc(c.name)}</div>
+          ${c.imageUrl ? `<span class="zoom-btn" data-zoom="${esc(c.imageUrl)}" title="Enlarge">🔍</span>` : ""}
+          <div class="card-tile-name">${esc(c.name)}${priceTagHTML(c, false)}</div>
         </button>`));
     });
   }
@@ -806,11 +1069,12 @@ function renderPrizes() {
   resultsGrid.innerHTML = "";
   players.forEach((p) => {
     const cards = claims.filter((c) => c.playerId === p.id).map((c) => pool.find((x) => x.id === c.cardId)).filter(Boolean);
+    const haul = cards.map(cardCad).filter((v) => v != null).reduce((a, b) => a + b, 0);
     resultsGrid.appendChild(el(`
       <div class="result-card">
-        <div class="pname">${esc(p.name)}</div>
+        <div class="pname">${esc(p.name)}${cards.length ? `<span class="haul">${money(haul)}</span>` : ""}</div>
         ${cards.length === 0 ? `<p class="empty">No picks yet</p>` : cards.map((c) => `
-          <div class="result-card-item">${cardVisualHTML(c, "mini")}<span>${esc(c.name)}</span></div>`).join("")}
+          <div class="result-card-item">${cardVisualHTML(c, "mini")}<span style="flex:1;">${esc(c.name)}</span>${priceTagHTML(c, false)}</div>`).join("")}
       </div>`));
   });
 }
@@ -844,7 +1108,8 @@ document.getElementById("newPlayerEmailInput").addEventListener("keydown", (e) =
 
 document.getElementById("roundsMinus").addEventListener("click", () => setTotalRounds((state.totalRounds || 3) - 1));
 document.getElementById("roundsPlus").addEventListener("click", () => setTotalRounds((state.totalRounds || 3) + 1));
-document.getElementById("startTournamentBtn").addEventListener("click", startTournament);
+document.getElementById("startTournamentBtn").addEventListener("click", organizerOnly(startTournament));
+document.getElementById("organizerPinInput").addEventListener("change", (e) => { setOrganizerPin(e.target.value); e.target.value = ""; });
 document.getElementById("organizerNameInput").addEventListener("change", (e) => eventRef.child("organizerName").set(e.target.value.trim()));
 document.getElementById("organizerEmailInput").addEventListener("change", (e) => eventRef.child("organizerEmail").set(e.target.value.trim()));
 document.getElementById("tournamentCostInput").addEventListener("change", (e) => {
@@ -852,16 +1117,22 @@ document.getElementById("tournamentCostInput").addEventListener("change", (e) =>
   eventRef.child("tournamentCost").set(v ? (v.startsWith("$") ? v : "$" + v) : "");
 });
 document.getElementById("paymentEmailInput").addEventListener("change", (e) => eventRef.child("paymentEmail").set(e.target.value.trim()));
-document.getElementById("nextRoundBtn").addEventListener("click", () => { viewedRoundKey = null; nextRound(); });
-document.getElementById("resetTournamentBtn").addEventListener("click", () => {
+document.getElementById("nextRoundBtn").addEventListener("click", organizerOnly(() => { viewedRoundKey = null; nextRound(); }));
+document.getElementById("resetTournamentBtn").addEventListener("click", organizerOnly(() => {
   if (confirm("Reset the tournament? This clears all rounds and results.")) resetTournament();
-});
+}));
 
 document.getElementById("addBulkBtn").addEventListener("click", () => {
   const ta = document.getElementById("bulkCardsInput");
   addBulkCards(ta.value); ta.value = "";
 });
 document.getElementById("retryImagesBtn").addEventListener("click", () => retryMissingImages());
+document.getElementById("refreshPricesBtn").addEventListener("click", async (e) => {
+  const btn = e.currentTarget;
+  btn.disabled = true; btn.textContent = "💲 Updating prices…";
+  await refreshPrices();
+  btn.disabled = false; btn.textContent = "💲 Update prices";
+});
 document.getElementById("addSingleBtn").addEventListener("click", () => {
   const input = document.getElementById("singleCardInput");
   addSingleCard(input.value); input.value = "";
@@ -869,10 +1140,15 @@ document.getElementById("addSingleBtn").addEventListener("click", () => {
 document.getElementById("singleCardInput").addEventListener("keydown", (e) => {
   if (e.key === "Enter") { addSingleCard(e.target.value); e.target.value = ""; }
 });
-document.getElementById("beginDraftBtn").addEventListener("click", beginDraft);
-document.getElementById("undoPickBtn").addEventListener("click", undoLastPick);
-document.getElementById("restartDraftBtn").addEventListener("click", () => {
+document.getElementById("beginDraftBtn").addEventListener("click", organizerOnly(beginDraft));
+document.getElementById("undoPickBtn").addEventListener("click", organizerOnly(undoLastPick));
+document.getElementById("restartDraftBtn").addEventListener("click", organizerOnly(() => {
   if (confirm("Restart the prize draft? This clears all picks.")) resetPrizeDraft();
+}));
+document.getElementById("pickEmailsToggle").addEventListener("change", async (e) => {
+  const on = e.target.checked;
+  if (!(await requireOrganizer())) { e.target.checked = !on; return; }
+  eventRef.child("pickEmailsOff").set(on ? null : true);
 });
 
 document.querySelectorAll(".tab").forEach((tab) => {
@@ -884,17 +1160,40 @@ document.getElementById("app").addEventListener("click", (e) => {
   const rm = e.target.closest("[data-remove-player]");
   if (rm) return removePlayer(rm.dataset.removePlayer);
 
+  const ep = e.target.closest("[data-edit-player]");
+  if (ep) return organizerOnly(() => { editingPlayerId = ep.dataset.editPlayer; render(); document.getElementById("editNameInput")?.focus(); })();
+
+  const svp = e.target.closest("[data-save-player]");
+  if (svp) {
+    const ok = savePlayerEdit(svp.dataset.savePlayer, document.getElementById("editNameInput").value, document.getElementById("editEmailInput").value);
+    if (ok) { editingPlayerId = null; render(); }
+    return;
+  }
+  if (e.target.closest("[data-cancel-edit]")) { editingPlayerId = null; return render(); }
+
+  const dp = e.target.closest("[data-drop-player]");
+  if (dp) {
+    const id = dp.dataset.dropPlayer;
+    return organizerOnly(() => {
+      if (isDropped(id)) return setDropped(id, false);
+      if (confirm(`Drop ${nameOf(id)}? They keep their results so far but won't be paired in future rounds. If they're in an unfinished match this round, record it as a 2-0 win for their opponent.`)) setDropped(id, true);
+    })();
+  }
+
   const vr = e.target.closest("[data-view-round]");
   if (vr) { viewedRoundKey = vr.dataset.viewRound || null; return render(); }
 
   const gm = e.target.closest("[data-game]");
   if (gm) { const [rk, mid, side, delta] = gm.dataset.game.split("|"); return setGameWins(rk, mid, side, parseInt(delta)); }
 
+  const sp = e.target.closest("[data-set-price]");
+  if (sp) return setManualPrice(sp.dataset.setPrice);
+
   const rc = e.target.closest("[data-remove-card]");
   if (rc) return removeCard(rc.dataset.removeCard);
 
   const cp = e.target.id === "clearPoolBtn" ? true : e.target.closest("#clearPoolBtn");
-  if (cp) { if (confirm("Remove all cards from the prize pool?")) clearPool(); return; }
+  if (cp) return organizerOnly(() => { if (confirm("Remove all cards from the prize pool?")) clearPool(); })();
 
   const cc = e.target.closest("[data-claim]");
   if (cc) return claimCard(cc.dataset.claim);
@@ -916,7 +1215,32 @@ function positionCardPreview(e) {
   cardPreview.style.top = y + "px";
 }
 
+// Touch screens can't hover, so there a tap opens the card full-size in the
+// middle of the screen and any tap closes it. Draft tiles claim on tap, so
+// they get a separate 🔍 button for this instead.
+const isTouch = window.matchMedia("(hover: none)").matches;
+function openCardModal(url) {
+  cardPreviewImg.src = url;
+  cardPreview.classList.add("modal");
+  cardPreview.style.display = "flex";
+}
+document.addEventListener("click", (e) => {
+  if (cardPreview.classList.contains("modal")) {
+    cardPreview.classList.remove("modal");
+    cardPreview.style.display = "none";
+    e.stopPropagation(); e.preventDefault();
+    return;
+  }
+  const z = e.target.closest("[data-zoom]");
+  const p = isTouch && !e.target.closest("[data-claim]") && e.target.closest("[data-preview]");
+  if (z || p) {
+    e.stopPropagation(); e.preventDefault();
+    openCardModal((z || p).dataset.zoom || (z || p).dataset.preview);
+  }
+}, true);
+
 document.addEventListener("mouseover", (e) => {
+  if (isTouch) return;
   const t = e.target.closest("[data-preview]");
   if (!t) return;
   cardPreviewImg.src = t.dataset.preview;

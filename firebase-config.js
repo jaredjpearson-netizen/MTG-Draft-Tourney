@@ -14,3 +14,8 @@ const firebaseConfig = {
   messagingSenderId: "323254035303",
   appId: "1:323254035303:web:b30d83834ed7432bae45c2",
 };
+
+// The Firebase Authentication user that unlocks "Manage tournaments" on the
+// start screen. The master password is that user's password, so it lives in
+// Firebase (not in this file). See README.md → "Manage tournaments".
+const adminEmail = "mtgdrafttourneybot@gmail.com";
