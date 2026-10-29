@@ -204,6 +204,13 @@ input::placeholder, textarea::placeholder { color: #9c917a; }
 .match-row .pname { font-size: 14px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .match-row .pname.right { text-align: right; }
 .win-trophy { font-size: 13px; }
+.swap-chip {
+  font-family: 'Inter', sans-serif; font-size: 14px; color: var(--ink); background: var(--parchment);
+  border: 1px dashed var(--gold); border-radius: 999px; padding: 3px 11px; cursor: pointer; max-width: 100%;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.swap-chip:hover { border-style: solid; }
+.swap-chip.picked { background: var(--gold-bright); border-style: solid; color: var(--felt-deep); font-weight: 600; }
 .match-row .games-label { color: var(--ink-soft); font-size: 12.5px; white-space: nowrap; }
 .match-row .result-btns { display: flex; gap: 6px; }
 .games-stepper { display: flex; align-items: center; gap: 6px; }

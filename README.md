@@ -168,6 +168,9 @@ hosted.)
   odd player out gets a bye at random.
 - Once the tournament is running, the Tournament tab has round buttons to look
   back at any earlier round's matchups and scores.
+- **✎ Edit pairings** (Tournament tab, organizer PIN) lets you fix the
+  current round's pairings: tap two players to swap them. Only matches with
+  no games recorded can change (others show 🔒), and byes count too.
 - To drop a player mid-tournament, use **Drop** next to their name on the
   Players tab. They keep their results so far but aren't paired again. If
   they leave partway through a match, record it as 2-0 for their opponent.
@@ -178,7 +181,7 @@ hosted.)
   a "Retry missing card images" button appears in Prize pool setup to
   re-fetch just those.
 - **Organizer PIN** (optional, set in Tournament setup): once set, generating
-  rounds, resetting, editing or dropping players, starting/undoing/restarting the prize
+  rounds, editing pairings, resetting, editing or dropping players, starting/undoing/restarting the prize
   draft, clearing the prize pool and the pick-email switch all ask for it. Score entry and picking prizes stay open to everyone. Each
   device only has to enter it once. To change it, type a new PIN in the same
   field (you'll be asked for the current one first if this device hasn't
