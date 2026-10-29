@@ -500,6 +500,13 @@ function setGameWins(roundKey, matchId, side, delta) {
   const next = Math.max(0, Math.min(2, (match[field] || 0) + delta));
   eventRef.child("rounds/" + roundKey + "/matches/" + matchId + "/" + field).set(next);
 }
+// The winner of a finished match (or the player with a bye); null otherwise.
+function matchWinner(m) {
+  if (m.bye) return m.p1;
+  if (!matchComplete(m)) return null;
+  return (m.p1Wins || 0) > (m.p2Wins || 0) ? m.p1 : m.p2;
+}
+function trophy() { return `<span class="win-trophy" title="Winner">🏆</span>`; }
 function matchComplete(m) { return m.bye || (m.p1Wins || 0) >= 2 || (m.p2Wins || 0) >= 2; }
 
 function nextRound() {
@@ -888,15 +895,15 @@ function renderTournament() {
       if (m.bye) {
         matchesList.appendChild(el(`
           <div class="match-row">
-            <span class="pname">${esc(nameOf(m.p1))}</span>
+            <span class="pname">${esc(nameOf(m.p1))} ${trophy()}</span>
             <span style="font-size:12.5px;color:var(--ink-soft);font-style:italic;">bye — automatic win</span>
           </div>`));
       } else {
         const p1w = m.p1Wins || 0, p2w = m.p2Wins || 0;
         matchesList.appendChild(el(`
           <div class="match-row">
-            <span class="pname" style="grid-column:1;grid-row:1;">${esc(nameOf(m.p1))}</span>
-            <span class="pname right" style="grid-column:3;grid-row:1;">${esc(nameOf(m.p2))}</span>
+            <span class="pname" style="grid-column:1;grid-row:1;">${esc(nameOf(m.p1))}${matchWinner(m) === m.p1 ? " " + trophy() : ""}</span>
+            <span class="pname right" style="grid-column:3;grid-row:1;">${matchWinner(m) === m.p2 ? trophy() + " " : ""}${esc(nameOf(m.p2))}</span>
             <div class="games-stepper" style="grid-column:1;grid-row:2;justify-self:start;">
               <button class="icon-btn" data-game="${last.key}|${m.id}|p1|-1" ${p1w <= 0 ? "disabled" : ""}>−</button>
               <span class="games-count ${p1w > p2w ? "ahead" : ""}">${p1w}</span>
@@ -931,16 +938,16 @@ function pastMatchRow(m) {
   if (m.bye) {
     return el(`
       <div class="match-row">
-        <span class="pname">${esc(nameOf(m.p1))}</span>
+        <span class="pname">${esc(nameOf(m.p1))} ${trophy()}</span>
         <span style="font-size:12.5px;color:var(--ink-soft);font-style:italic;">bye — automatic win</span>
       </div>`);
   }
   const p1w = m.p1Wins || 0, p2w = m.p2Wins || 0;
   return el(`
     <div class="match-row">
-      <span class="pname ${p1w > p2w ? "won" : ""}" style="grid-column:1;grid-row:1;">${esc(nameOf(m.p1))}</span>
+      <span class="pname ${p1w > p2w ? "won" : ""}" style="grid-column:1;grid-row:1;">${esc(nameOf(m.p1))}${matchWinner(m) === m.p1 ? " " + trophy() : ""}</span>
       <span class="final-score" style="grid-column:2;grid-row:1;justify-self:center;">${p1w} – ${p2w}</span>
-      <span class="pname right ${p2w > p1w ? "won" : ""}" style="grid-column:3;grid-row:1;">${esc(nameOf(m.p2))}</span>
+      <span class="pname right ${p2w > p1w ? "won" : ""}" style="grid-column:3;grid-row:1;">${matchWinner(m) === m.p2 ? trophy() + " " : ""}${esc(nameOf(m.p2))}</span>
     </div>`);
 }
 
