@@ -198,6 +198,10 @@ hosted.)
   in the prize pool to pick its exact printing and finish (foil, etched,
   showcase, borderless, full art and so on). The card's picture and price
   switch to that version, and **Update prices** keeps using it.
+- **Picking in turn**: during the prize draft each person chooses their name
+  under **You are** (once per browser, PC or phone). Only the browser set to
+  the player whose turn it is can take a card, and it asks to confirm first.
+  The organizer, after entering the PIN, can pick on anyone's behalf.
 - **Sorting the prize grid**: during the draft, each person can sort the cards
   by price, rarity or color (their choice is remembered on their device).
   Unpriced "exotic" prizes such as booster packs always come first.

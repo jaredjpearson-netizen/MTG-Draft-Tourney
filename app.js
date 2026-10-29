@@ -244,6 +244,10 @@ async function requireOrganizer() {
   try { localStorage.setItem(unlockKey(), state.organizerPinHash); } catch (e) {}
   return true;
 }
+function organizerUnlocked() {
+  if (!state.organizerPinHash) return false;
+  try { return localStorage.getItem(unlockKey()) === state.organizerPinHash; } catch (e) { return false; }
+}
 // Wraps an action so it only runs once the organizer PIN (if any) checks out.
 function organizerOnly(fn) {
   return async (...args) => { if (await requireOrganizer()) fn(...args); };
@@ -854,9 +858,38 @@ function currentPickerId() {
   return order[claimsCount % n];
 }
 
-function claimCard(cardId) {
+/* "Who are you?": each browser remembers which player is using it, and only
+   that player's browser can pick on their turn. The organizer (with the PIN)
+   can pick for anyone, e.g. someone who isn't at a screen. */
+function meKey() { return "mtg-me-" + eventCode; }
+function myPlayerId() {
+  try { return localStorage.getItem(meKey()) || null; } catch (e) { return null; }
+}
+function setMe(id) {
+  try { if (id) localStorage.setItem(meKey(), id); else localStorage.removeItem(meKey()); } catch (e) {}
+  render();
+}
+async function claimCard(cardId) {
+  const picker = currentPickerId();
+  const card = (state.prizePool || {})[cardId];
+  if (!picker || !card) return;
+  const me = myPlayerId();
+  if (me !== picker) {
+    if (!organizerUnlocked()) {
+      const msg = me
+        ? `It's ${nameOf(picker)}'s turn, not yours. Only ${nameOf(picker)} can pick right now.`
+        : `It's ${nameOf(picker)}'s turn. If that's you, choose your name in "You are" above the cards first.`;
+      if (!confirm(msg + "\n\nAre you the organizer, picking on their behalf?")) return;
+      if (!state.organizerPinHash) { alert("Set an organizer PIN on the Players tab first, then the organizer can pick for others."); return; }
+      if (!(await requireOrganizer())) return;
+    }
+    if (!confirm(`Pick ${card.name} for ${nameOf(picker)}?`)) return;
+  } else if (!confirm(`Take ${card.name}?`)) return;
+  // Someone may have picked while the confirm box was open.
+  const claimed = Object.values(state.claims || {}).some((c) => c.cardId === cardId);
+  if (claimed || currentPickerId() !== picker) { alert("The draft moved on while you were deciding. Have another look."); return; }
   const key = newKey("events/" + eventCode + "/claims");
-  eventRef.child("claims/" + key).set({ cardId, playerId: currentPickerId(), ts: Date.now() });
+  eventRef.child("claims/" + key).set({ cardId, playerId: picker, ts: Date.now() });
 }
 function undoLastPick() {
   const claims = Object.entries(state.claims || {}).sort((a, b) => (a[1].ts || 0) - (b[1].ts || 0));
@@ -1267,8 +1300,11 @@ function renderPrizes() {
 
   const banner = document.getElementById("pickerBanner");
   if (!draftComplete) {
+    const picker = currentPickerId();
+    const myTurn = picker && picker === myPlayerId();
     banner.style.display = "block";
-    banner.textContent = "Now picking: " + nameOf(currentPickerId());
+    banner.classList.toggle("my-turn", !!myTurn);
+    banner.textContent = myTurn ? "Your turn! Tap a card to take it." : "Now picking: " + nameOf(picker);
     notifyCurrentPickerIfNeeded();
   } else {
     banner.style.display = "none";
@@ -1278,6 +1314,14 @@ function renderPrizes() {
   cardsGrid.innerHTML = "";
   cardsGrid.style.display = draftComplete ? "none" : "grid";
   document.getElementById("prizeSortBar").style.display = draftComplete ? "none" : "flex";
+  const meRow = document.getElementById("whoAmIRow");
+  meRow.style.display = draftComplete ? "none" : "flex";
+  const meSelect = document.getElementById("whoAmISelect");
+  const me = myPlayerId();
+  meSelect.innerHTML = `<option value="">Choose your name…</option>` +
+    players.map((p) => `<option value="${p.id}" ${p.id === me ? "selected" : ""}>${esc(p.name)}</option>`).join("");
+  const canPick = draftComplete || organizerUnlocked() || currentPickerId() === me;
+  cardsGrid.classList.toggle("locked", !canPick);
   if (!draftComplete) {
     const mode = prizeSort();
     document.querySelectorAll("[data-prize-sort]").forEach((b) => b.classList.toggle("active", b.dataset.prizeSort === mode));
@@ -1386,6 +1430,12 @@ document.getElementById("variantPicker").addEventListener("click", (e) => {
   if (pick) { const [printId, finish] = pick.dataset.pickPrint.split("|"); return choosePrinting(modal.dataset.cardId, printId, finish); }
   if (e.target.id === "variantResetBtn") return resetPrinting(modal.dataset.cardId);
   if (e.target === modal || e.target.closest("#variantCloseBtn")) closeVariantPicker();
+});
+document.getElementById("whoAmISelect").addEventListener("change", (e) => {
+  const prev = myPlayerId();
+  const next = e.target.value || null;
+  if (prev && next !== prev && !confirm(`This browser is set to ${nameOf(prev)}. Switch it to ${next ? nameOf(next) : "nobody"}?`)) return render();
+  setMe(next);
 });
 document.querySelectorAll("[data-prize-sort]").forEach((b) => b.addEventListener("click", () => setPrizeSort(b.dataset.prizeSort)));
 document.getElementById("pickEmailsToggle").addEventListener("change", async (e) => {

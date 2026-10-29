@@ -367,3 +367,14 @@ input::placeholder, textarea::placeholder { color: #9c917a; }
 .variant-info strong { font-size: 13.5px; color: var(--ink); }
 .variant-price { font-size: 13px; font-weight: 700; white-space: nowrap; }
 #variantResetBtn { align-self: flex-start; }
+
+.who-am-i { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 10px; font-size: 13.5px; color: var(--ink); }
+.who-am-i label { font-weight: 600; }
+.who-am-i select {
+  padding: 5px 8px; border-radius: 8px; border: 1px solid var(--parchment-line); background: var(--cream);
+  color: var(--ink); font-family: 'Inter', sans-serif; font-size: 13.5px;
+}
+.who-am-i .who-hint { font-size: 12px; color: var(--ink-soft); }
+.picker-banner.my-turn { background: var(--gold-bright); }
+.cards-grid.locked .card-tile { opacity: .6; cursor: not-allowed; }
+.cards-grid.locked .card-tile:hover { transform: none; box-shadow: none; }
