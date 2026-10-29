@@ -217,70 +217,54 @@ function generateRound1Pairings() {
   return matches;
 }
 
-// Round 2+: standard Swiss bracket pairing. Priority 1 is that players with
-// matching records (score brackets) play each other — winners face other
-// winners, etc. Priority 2, applied within that, is dodging repeat
-// opponents. A player who can't be paired within their own bracket (odd
-// bracket size, or everyone left is a repeat) "floats" down into the next
-// bracket rather than forcing a same-bracket rematch.
+// Round 2+: Swiss pairing. Players are taken in standings order and each is
+// paired with the closest-ranked opponent they haven't played yet, so people
+// with matching records face each other wherever possible and anyone who
+// can't be matched in their own bracket floats to the nearest one. Unlike a
+// simple greedy pass, this backtracks: if an early choice would leave two
+// players at the bottom who already met, it goes back and tries the next
+// option. A rematch is only allowed when no rematch-free pairing exists.
 function generateSwissPairings(rounds) {
   const standings = computeStandings(); // already sorted: points, then OMW%/GW%/OGW% tiebreakers
-  let ids = standings.map((s) => s.id);
-  const pointsOf = {};
-  standings.forEach((s) => { pointsOf[s.id] = s.points; });
+  const ids = standings.map((s) => s.id);
 
-  const matches = [];
+  // Bye candidates: lowest-ranked player who hasn't had one comes first.
+  // Everyone else (if all have had one) follows, still bottom-up.
+  let byeCandidates = [null];
   if (ids.length % 2 === 1) {
-    let byeIdx = -1;
-    for (let i = ids.length - 1; i >= 0; i--) if (!hadBye(rounds, ids[i])) { byeIdx = i; break; }
-    if (byeIdx === -1) byeIdx = ids.length - 1;
-    matches.push({ p1: ids[byeIdx], p2: null, bye: true });
-    ids.splice(byeIdx, 1);
+    const reversed = [...ids].reverse();
+    byeCandidates = [...reversed.filter((id) => !hadBye(rounds, id)), ...reversed.filter((id) => hadBye(rounds, id))];
   }
 
-  // Group the (already score-sorted) remaining players into brackets of
-  // equal match points.
-  const brackets = [];
-  ids.forEach((id) => {
-    const last = brackets[brackets.length - 1];
-    if (last && pointsOf[last[0]] === pointsOf[id]) last.push(id);
-    else brackets.push([id]);
-  });
-
-  let floaters = [];
-  brackets.forEach((bracket, bi) => {
-    const group = [...floaters, ...bracket];
-    floaters = [];
-    const used = new Set();
-    for (let i = 0; i < group.length; i++) {
-      const a = group[i];
-      if (used.has(a)) continue;
-      let partnerIdx = -1;
-      for (let j = i + 1; j < group.length; j++) {
-        if (!used.has(group[j]) && !playedBefore(rounds, a, group[j])) { partnerIdx = j; break; }
-      }
-      if (partnerIdx === -1) {
-        // No fresh opponent left in this bracket. On the last bracket we
-        // have no lower group to float into, so accept a repeat rather
-        // than leave someone unpaired; otherwise float down.
-        const isLastBracket = bi === brackets.length - 1;
-        if (isLastBracket) {
-          for (let j = i + 1; j < group.length; j++) if (!used.has(group[j])) { partnerIdx = j; break; }
-        }
-      }
-      if (partnerIdx === -1) { floaters.push(a); used.add(a); continue; }
-      const b = group[partnerIdx];
-      used.add(a); used.add(b);
-      matches.push({ p1: a, p2: b, bye: false, p1Wins: 0, p2Wins: 0 });
+  // Try 0 rematches first, then 1, 2, … until a pairing is found.
+  for (let allowedRematches = 0; allowedRematches <= ids.length; allowedRematches++) {
+    for (const byeId of byeCandidates) {
+      const pool = ids.filter((id) => id !== byeId);
+      const pairs = pairSwiss(pool, (a, b) => playedBefore(rounds, a, b), allowedRematches);
+      if (!pairs) continue;
+      const matches = pairs.map(([a, b]) => ({ p1: a, p2: b, bye: false, p1Wins: 0, p2Wins: 0 }));
+      if (byeId) matches.unshift({ p1: byeId, p2: null, bye: true });
+      return matches;
     }
-  });
-
-  // Shouldn't normally happen (total player count is even after the bye),
-  // but if floaters are left over with nowhere lower to go, pair them off.
-  while (floaters.length > 1) {
-    matches.push({ p1: floaters.shift(), p2: floaters.shift(), bye: false, p1Wins: 0, p2Wins: 0 });
   }
-  return matches;
+  return [];
+}
+
+// Pairs an even-length list of ids (in standings order) by backtracking.
+// Returns an array of [a, b] pairs, or null if it can't be done with at most
+// `rematchesLeft` repeat matchups.
+function pairSwiss(pool, metBefore, rematchesLeft) {
+  if (pool.length === 0) return [];
+  const [a, ...rest] = pool;
+  for (let j = 0; j < rest.length; j++) {
+    const b = rest[j];
+    const isRematch = metBefore(a, b);
+    if (isRematch && rematchesLeft === 0) continue;
+    const remaining = rest.filter((_, k) => k !== j);
+    const tail = pairSwiss(remaining, metBefore, rematchesLeft - (isRematch ? 1 : 0));
+    if (tail) return [[a, b], ...tail];
+  }
+  return null;
 }
 
 /* ---------------------------------------------------------
