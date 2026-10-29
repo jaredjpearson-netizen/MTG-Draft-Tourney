@@ -559,19 +559,125 @@ function usdOf(prices) {
   const usd = parseFloat(p.usd || p.usd_foil || p.usd_etched);
   return isNaN(usd) ? null : usd;
 }
+function cardImage(data, size) {
+  if (data.image_uris) return data.image_uris[size] || null;
+  const face = data.card_faces && data.card_faces[0];
+  return (face && face.image_uris && face.image_uris[size]) || null;
+}
+// finish: a specific finish ("nonfoil", "foil", "etched") for a chosen
+// printing, or undefined for the default printing.
+function resultFromCard(data, finish) {
+  const url = cardImage(data, "normal");
+  // Scryfall's prices are USD market prices; for the default printing fall
+  // back to the foil/etched price for cards that only exist that way.
+  const priceUsd = finish ? finishPrice(data.prices, finish) : usdOf(data.prices);
+  const face = (data.card_faces && data.card_faces[0]) || {};
+  const colors = (data.colors || face.colors || []).join("");
+  return { url, notACard: !url, priceUsd, rarity: data.rarity || null, colors };
+}
 async function fetchCardImage(name) {
   const { status, data } = await scryfallGet("https://api.scryfall.com/cards/named?fuzzy=" + encodeURIComponent(name));
   if (status === 404) return { url: null, notACard: true };
   if (!data) return { url: null, notACard: false, failed: true, status };
-  let url = null;
-  if (data.image_uris && data.image_uris.normal) url = data.image_uris.normal;
-  else if (data.card_faces && data.card_faces[0] && data.card_faces[0].image_uris) url = data.card_faces[0].image_uris.normal;
-  // Scryfall's prices are USD market prices for the card's default printing;
-  // fall back to the foil/etched price for cards that only exist that way.
-  const priceUsd = usdOf(data.prices);
-  const face = (data.card_faces && data.card_faces[0]) || {};
-  const colors = (data.colors || face.colors || []).join("");
-  return { url, notACard: !url, priceUsd, rarity: data.rarity || null, colors };
+  return resultFromCard(data);
+}
+async function fetchPrinting(printId, finish) {
+  const { status, data } = await scryfallGet("https://api.scryfall.com/cards/" + encodeURIComponent(printId));
+  if (!data) return { url: null, notACard: false, failed: true, status };
+  return resultFromCard(data, finish);
+}
+
+/* Card variants: pick the exact printing (set, frame, art) and finish of a
+   prize card, so its image and price match the copy on the table. */
+function finishPrice(prices, finish) {
+  const p = prices || {};
+  const v = parseFloat(finish === "foil" ? p.usd_foil : finish === "etched" ? p.usd_etched : p.usd);
+  return isNaN(v) ? null : v;
+}
+function variantLabel(card, finish) {
+  const bits = [];
+  if (finish === "foil") bits.push("Foil");
+  if (finish === "etched") bits.push("Etched foil");
+  (card.promo_types || []).forEach((t) => {
+    // A named foil treatment (galaxy, surge…) replaces the plain "Foil".
+    if (finish === "foil" && /.foil$/.test(t)) bits[0] = t[0].toUpperCase() + t.slice(1, -4) + " foil";
+    if (t === "serialized") bits.push("Serialized");
+    if (t === "prerelease") bits.push("Prerelease");
+    if (t === "datestamped") bits.push("Date-stamped");
+  });
+  const fx = card.frame_effects || [];
+  if (fx.includes("showcase")) bits.push("Showcase");
+  if (card.border_color === "borderless") bits.push("Borderless");
+  if (fx.includes("extendedart")) bits.push("Extended art");
+  if (card.full_art) bits.push("Full art");
+  if (card.textless) bits.push("Textless");
+  if ((card.frame === "1993" || card.frame === "1997") && (card.released_at || "") >= "2020") bits.push("Retro frame");
+  return bits.join(" · ");
+}
+function variantTagHTML(c) {
+  if (!c.variant && !c.setName) return "";
+  return `<span class="variant-tag" title="${esc(c.setName || "")}">${esc(c.variant || c.setName)}</span>`;
+}
+async function openVariantPicker(cardId) {
+  const c = (state.prizePool || {})[cardId];
+  if (!c) return;
+  const modal = document.getElementById("variantPicker");
+  const list = document.getElementById("variantList");
+  document.getElementById("variantTitle").textContent = c.name;
+  document.getElementById("variantResetBtn").style.display = c.printId ? "inline-block" : "none";
+  modal.dataset.cardId = cardId;
+  modal.style.display = "flex";
+  list.innerHTML = `<p class="empty">Loading printings from Scryfall…</p>`;
+  const named = await scryfallGet("https://api.scryfall.com/cards/named?fuzzy=" + encodeURIComponent(c.name));
+  let prints = [];
+  let next = named.data && named.data.prints_search_uri;
+  for (let page = 0; next && page < 4; page++) {
+    const res = await scryfallGet(next);
+    if (!res.data) break;
+    prints = prints.concat(res.data.data || []);
+    next = res.data.has_more ? res.data.next_page : null;
+  }
+  if (modal.dataset.cardId !== cardId) return;
+  if (!prints.length) { list.innerHTML = `<p class="empty">Couldn't load printings from Scryfall. Try again in a moment.</p>`; return; }
+  openVariantPicker.prints = Object.fromEntries(prints.map((pr) => [pr.id, pr]));
+  list.innerHTML = prints.flatMap((pr) => (pr.finishes || ["nonfoil"]).map((finish) => {
+    const usd = finishPrice(pr.prices, finish);
+    const cad = usd != null && usdToCad ? money(usd * usdToCad) : "no price";
+    const label = variantLabel(pr, finish) || "Regular";
+    const picked = c.printId === pr.id && c.finish === finish;
+    const img = cardImage(pr, "small");
+    return `
+      <button class="variant-option ${picked ? "picked" : ""}" data-pick-print="${pr.id}|${finish}">
+        ${img ? `<img src="${img}" alt="" loading="lazy" />` : `<span class="variant-noimg">📦</span>`}
+        <span class="variant-info">
+          <strong>${esc(label)}</strong>
+          <span>${esc(pr.set_name)} #${esc(pr.collector_number)}</span>
+        </span>
+        <span class="variant-price">${cad}</span>
+      </button>`;
+  })).join("");
+}
+function closeVariantPicker() {
+  const modal = document.getElementById("variantPicker");
+  modal.style.display = "none";
+  modal.dataset.cardId = "";
+}
+function choosePrinting(cardId, printId, finish) {
+  const pr = (openVariantPicker.prints || {})[printId];
+  if (!pr || state.draftStarted) return;
+  eventRef.child("prizePool/" + cardId).update({
+    ...cardFields(resultFromCard(pr, finish)),
+    printId, finish, setName: pr.set_name + " #" + pr.collector_number, variant: variantLabel(pr, finish) || null,
+  });
+  closeVariantPicker();
+}
+async function resetPrinting(cardId) {
+  const c = (state.prizePool || {})[cardId];
+  if (!c || state.draftStarted) return;
+  closeVariantPicker();
+  await eventRef.child("prizePool/" + cardId).update({ printId: null, finish: null, setName: null, variant: null });
+  const result = await fetchCardImage(c.name);
+  if (!result.failed) eventRef.child("prizePool/" + cardId).update(cardFields(result));
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 function statusFor(result) { return result.url ? "found" : result.notACard ? "not_a_card" : "none"; }
@@ -668,7 +774,7 @@ async function refreshPrices(onProgress) {
   const tally = { priced: 0, noPrice: [], failed: [] };
   for (const [i, [id, c]] of cards.entries()) {
     if (onProgress) onProgress(i + 1, cards.length);
-    const result = await fetchCardImage(c.name);
+    const result = c.printId ? await fetchPrinting(c.printId, c.finish) : await fetchCardImage(c.name);
     if (result.failed) {
       tally.failed.push(c.name);
       console.warn("[MTG draft] Price lookup failed for", c.name, "(HTTP " + result.status + ")");
@@ -1127,11 +1233,12 @@ function renderPrizes() {
     pool.forEach((c) => {
       poolList.appendChild(el(`
         <div class="list-item">
-          <span style="display:flex;align-items:center;gap:9px;">
+          <span style="display:flex;align-items:center;gap:9px;min-width:0;">
             ${cardVisualHTML(c, "thumb")}
-            ${esc(c.name)}
+            <span>${esc(c.name)}${variantTagHTML(c)}</span>
           </span>
           <span style="display:flex;align-items:center;gap:8px;">
+            ${c.imageStatus === "found" ? `<button class="variant-btn" data-variant="${c.id}" title="Choose the printing and finish">✨ ${c.printId ? "Change" : "Variant"}</button>` : ""}
             ${priceTagHTML(c, true)}
             <button class="x-btn" data-remove-card="${c.id}">✕</button>
           </span>
@@ -1179,7 +1286,7 @@ function renderPrizes() {
         <button class="card-tile" data-claim="${c.id}">
           ${cardVisualHTML(c, "tile")}
           ${c.imageUrl ? `<span class="zoom-btn" data-zoom="${esc(c.imageUrl)}" title="Enlarge">🔍</span>` : ""}
-          <div class="card-tile-name">${esc(c.name)}${priceTagHTML(c, false)}</div>
+          <div class="card-tile-name">${esc(c.name)}${variantTagHTML(c)}${priceTagHTML(c, false)}</div>
         </button>`));
     });
   }
@@ -1194,7 +1301,7 @@ function renderPrizes() {
       <div class="result-card">
         <div class="pname">${esc(p.name)}${cards.length ? `<span class="haul">${money(haul)}</span>` : ""}</div>
         ${cards.length === 0 ? `<p class="empty">No picks yet</p>` : cards.map((c) => `
-          <div class="result-card-item">${cardVisualHTML(c, "mini")}<span style="flex:1;">${esc(c.name)}</span>${priceTagHTML(c, false)}</div>`).join("")}
+          <div class="result-card-item">${cardVisualHTML(c, "mini")}<span style="flex:1;">${esc(c.name)}${variantTagHTML(c)}</span>${priceTagHTML(c, false)}</div>`).join("")}
       </div>`));
   });
 }
@@ -1273,6 +1380,13 @@ document.getElementById("undoPickBtn").addEventListener("click", organizerOnly(u
 document.getElementById("restartDraftBtn").addEventListener("click", organizerOnly(() => {
   if (confirm("Restart the prize draft? This clears all picks.")) resetPrizeDraft();
 }));
+document.getElementById("variantPicker").addEventListener("click", (e) => {
+  const modal = e.currentTarget;
+  const pick = e.target.closest("[data-pick-print]");
+  if (pick) { const [printId, finish] = pick.dataset.pickPrint.split("|"); return choosePrinting(modal.dataset.cardId, printId, finish); }
+  if (e.target.id === "variantResetBtn") return resetPrinting(modal.dataset.cardId);
+  if (e.target === modal || e.target.closest("#variantCloseBtn")) closeVariantPicker();
+});
 document.querySelectorAll("[data-prize-sort]").forEach((b) => b.addEventListener("click", () => setPrizeSort(b.dataset.prizeSort)));
 document.getElementById("pickEmailsToggle").addEventListener("change", async (e) => {
   const on = e.target.checked;
@@ -1317,6 +1431,9 @@ document.getElementById("app").addEventListener("click", (e) => {
 
   const gm = e.target.closest("[data-game]");
   if (gm) { const [rk, mid, side, delta] = gm.dataset.game.split("|"); return setGameWins(rk, mid, side, parseInt(delta)); }
+
+  const vb = e.target.closest("[data-variant]");
+  if (vb) return openVariantPicker(vb.dataset.variant);
 
   const sp = e.target.closest("[data-set-price]");
   if (sp) return setManualPrice(sp.dataset.setPrice);

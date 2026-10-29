@@ -194,6 +194,10 @@ hosted.)
   player's haul show totals. Tap a price in the prize pool list to type your
   own, e.g. for booster packs, which Scryfall can't price. **Update prices**
   re-checks every card.
+- **Card variants**: before the draft starts, tap **✨ Variant** next to a card
+  in the prize pool to pick its exact printing and finish (foil, etched,
+  showcase, borderless, full art and so on). The card's picture and price
+  switch to that version, and **Update prices** keeps using it.
 - **Sorting the prize grid**: during the draft, each person can sort the cards
   by price, rarity or color (their choice is remembered on their device).
   Unpriced "exotic" prizes such as booster packs always come first.
