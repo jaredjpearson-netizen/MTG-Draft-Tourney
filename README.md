@@ -194,6 +194,9 @@ hosted.)
   player's haul show totals. Tap a price in the prize pool list to type your
   own, e.g. for booster packs, which Scryfall can't price. **Update prices**
   re-checks every card.
+- **Sorting the prize grid**: during the draft, each person can sort the cards
+  by price, rarity or color (their choice is remembered on their device).
+  Unpriced "exotic" prizes such as booster packs always come first.
 - **Pick emails switch**: the checkbox at the top of the Prize draft tab turns
   the "your turn to pick" emails on or off, which saves most of the EmailJS
   monthly quota (200 emails/month) when everyone's in the same room.
