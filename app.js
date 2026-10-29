@@ -569,11 +569,61 @@ async function fetchCardImage(name) {
   // Scryfall's prices are USD market prices for the card's default printing;
   // fall back to the foil/etched price for cards that only exist that way.
   const priceUsd = usdOf(data.prices);
-  return { url, notACard: !url, priceUsd };
+  const face = (data.card_faces && data.card_faces[0]) || {};
+  const colors = (data.colors || face.colors || []).join("");
+  return { url, notACard: !url, priceUsd, rarity: data.rarity || null, colors };
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 function statusFor(result) { return result.url ? "found" : result.notACard ? "not_a_card" : "none"; }
-function cardFields(result) { return { imageUrl: result.url, imageStatus: statusFor(result), priceUsd: result.priceUsd ?? null }; }
+function cardFields(result) {
+  return { imageUrl: result.url, imageStatus: statusFor(result), priceUsd: result.priceUsd ?? null,
+           rarity: result.rarity ?? null, colors: result.colors ?? null };
+}
+
+// Prize grid sort. Each viewer picks their own order; exotic (unpriced)
+// prizes always come first, in the order they were added.
+function prizeSort() {
+  try { return localStorage.getItem("mtg-prize-sort") || "price"; } catch (e) { return "price"; }
+}
+function setPrizeSort(mode) {
+  try { localStorage.setItem("mtg-prize-sort", mode); } catch (e) {}
+  if (mode !== "price") backfillCardDetails();
+  render();
+}
+function rarityRank(c) {
+  const order = ["special", "bonus", "mythic", "rare", "uncommon", "common"];
+  const i = order.indexOf(c.rarity);
+  return i < 0 ? order.length : i;
+}
+// Mono colours in WUBRG order, then multicolour, then colourless.
+function colorRank(c) {
+  const col = c.colors || "";
+  if (col.length === 1) return "WUBRG".indexOf(col);
+  return col.length > 1 ? 5 : 6;
+}
+function sortPrizes(cards, mode) {
+  const byPrice = (a, b) => cardCad(b) - cardCad(a);
+  const rank = mode === "rarity" ? rarityRank : mode === "color" ? colorRank : null;
+  return cards.slice().sort((a, b) => {
+    const va = cardCad(a), vb = cardCad(b);
+    if (va == null || vb == null) return (va == null ? 0 : 1) - (vb == null ? 0 : 1);
+    return (rank ? rank(a) - rank(b) : 0) || byPrice(a, b) || a.name.localeCompare(b.name);
+  });
+}
+// Cards added before rarity/colours were saved get them filled in the first
+// time someone sorts by rarity or colour.
+async function backfillCardDetails() {
+  if (backfillCardDetails.running) return;
+  backfillCardDetails.running = true;
+  const missing = Object.entries(state.prizePool || {})
+    .filter(([, c]) => c.imageStatus !== "not_a_card" && (c.rarity == null || c.colors == null));
+  for (const [id, c] of missing) {
+    const result = await fetchCardImage(c.name);
+    if (!result.failed && !result.notACard) eventRef.child("prizePool/" + id).update({ rarity: result.rarity, colors: result.colors });
+    await sleep(250);
+  }
+  backfillCardDetails.running = false;
+}
 
 async function addBulkCards(text) {
   const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
@@ -1120,14 +1170,11 @@ function renderPrizes() {
   const cardsGrid = document.getElementById("cardsGrid");
   cardsGrid.innerHTML = "";
   cardsGrid.style.display = draftComplete ? "none" : "grid";
+  document.getElementById("prizeSortBar").style.display = draftComplete ? "none" : "flex";
   if (!draftComplete) {
-    // Exotic (unpriced) prizes first, then most valuable to least.
-    const byValue = remaining.slice().sort((a, b) => {
-      const va = cardCad(a), vb = cardCad(b);
-      if (va == null || vb == null) return (va == null ? 0 : 1) - (vb == null ? 0 : 1);
-      return vb - va;
-    });
-    byValue.forEach((c) => {
+    const mode = prizeSort();
+    document.querySelectorAll("[data-prize-sort]").forEach((b) => b.classList.toggle("active", b.dataset.prizeSort === mode));
+    sortPrizes(remaining, mode).forEach((c) => {
       cardsGrid.appendChild(el(`
         <button class="card-tile" data-claim="${c.id}">
           ${cardVisualHTML(c, "tile")}
@@ -1226,6 +1273,7 @@ document.getElementById("undoPickBtn").addEventListener("click", organizerOnly(u
 document.getElementById("restartDraftBtn").addEventListener("click", organizerOnly(() => {
   if (confirm("Restart the prize draft? This clears all picks.")) resetPrizeDraft();
 }));
+document.querySelectorAll("[data-prize-sort]").forEach((b) => b.addEventListener("click", () => setPrizeSort(b.dataset.prizeSort)));
 document.getElementById("pickEmailsToggle").addEventListener("change", async (e) => {
   const on = e.target.checked;
   if (!(await requireOrganizer())) { e.target.checked = !on; return; }
