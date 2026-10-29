@@ -578,7 +578,9 @@ function resultFromCard(data, finish) {
   const face = (data.card_faces && data.card_faces[0]) || {};
   const colors = (data.colors || face.colors || []).join("");
   const setName = data.set_name ? data.set_name + " #" + data.collector_number : null;
-  return { url, notACard: !url, priceUsd, rarity: data.rarity || null, colors, setName };
+  const colorIdentity = (data.color_identity || []).join("");
+  const typeLine = data.type_line || face.type_line || null;
+  return { url, notACard: !url, priceUsd, rarity: data.rarity || null, colors, colorIdentity, typeLine, setName };
 }
 async function fetchCardImage(name) {
   const { status, data } = await scryfallGet("https://api.scryfall.com/cards/named?fuzzy=" + encodeURIComponent(name));
@@ -694,7 +696,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 function statusFor(result) { return result.url ? "found" : result.notACard ? "not_a_card" : "none"; }
 function cardFields(result) {
   return { imageUrl: result.url, imageStatus: statusFor(result), priceUsd: result.priceUsd ?? null,
-           rarity: result.rarity ?? null, colors: result.colors ?? null, setName: result.setName ?? null };
+           rarity: result.rarity ?? null, colors: result.colors ?? null,
+           colorIdentity: result.colorIdentity ?? null, typeLine: result.typeLine ?? null, setName: result.setName ?? null };
 }
 
 // Prize grid sort. Each viewer picks their own order; exotic (unpriced)
@@ -713,30 +716,45 @@ function rarityRank(c) {
   return i < 0 ? order.length : i;
 }
 // Mono colours in WUBRG order, then multicolour, then colourless.
+// Colourless cards (artifacts, lands) go by the colours they make or use,
+// e.g. a Forest or a green-only artifact sorts with the green cards.
 function colorRank(c) {
-  const col = c.colors || "";
+  const col = c.colors || c.colorIdentity || "";
   if (col.length === 1) return "WUBRG".indexOf(col);
   return col.length > 1 ? 5 : 6;
 }
+// Creatures, planeswalkers, battles, instants, sorceries, artifacts,
+// enchantments, then lands. A card with several types goes by the first
+// that matches in the precedence list (an artifact creature is a creature,
+// an artifact land is a land).
+function typeRank(c) {
+  const front = (c.typeLine || "").split("//")[0];
+  const order = ["Creature", "Planeswalker", "Battle", "Instant", "Sorcery", "Artifact", "Enchantment", "Land"];
+  const precedence = ["Land", "Creature", "Planeswalker", "Battle", "Instant", "Sorcery", "Artifact", "Enchantment"];
+  const t = precedence.find((name) => new RegExp("\\b" + name + "\\b").test(front));
+  return t ? order.indexOf(t) : order.length;
+}
 function sortPrizes(cards, mode) {
   const byPrice = (a, b) => cardCad(b) - cardCad(a);
-  const rank = mode === "rarity" ? rarityRank : mode === "color" ? colorRank : null;
+  const rank = { rarity: rarityRank, color: colorRank, type: typeRank }[mode] || null;
   return cards.slice().sort((a, b) => {
     const va = cardCad(a), vb = cardCad(b);
     if (va == null || vb == null) return (va == null ? 0 : 1) - (vb == null ? 0 : 1);
     return (rank ? rank(a) - rank(b) : 0) || byPrice(a, b) || a.name.localeCompare(b.name);
   });
 }
-// Cards added before rarity/colours were saved get them filled in the first
-// time someone sorts by rarity or colour.
+// Cards added before rarity/colours/types were saved get them filled in the
+// first time someone sorts by something other than price.
 async function backfillCardDetails() {
   if (backfillCardDetails.running) return;
   backfillCardDetails.running = true;
   const missing = Object.entries(state.prizePool || {})
-    .filter(([, c]) => c.imageStatus !== "not_a_card" && (c.rarity == null || c.colors == null));
+    .filter(([, c]) => c.imageStatus !== "not_a_card" && (c.rarity == null || c.colors == null || c.colorIdentity == null || c.typeLine == null));
   for (const [id, c] of missing) {
-    const result = await fetchCardImage(c.name);
-    if (!result.failed && !result.notACard) eventRef.child("prizePool/" + id).update({ rarity: result.rarity, colors: result.colors });
+    const result = c.printId ? await fetchPrinting(c.printId, c.finish) : await fetchCardImage(c.name);
+    if (!result.failed && !result.notACard) {
+      eventRef.child("prizePool/" + id).update({ rarity: result.rarity, colors: result.colors, colorIdentity: result.colorIdentity, typeLine: result.typeLine });
+    }
     await sleep(250);
   }
   backfillCardDetails.running = false;
