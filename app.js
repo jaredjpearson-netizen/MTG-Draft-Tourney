@@ -666,13 +666,16 @@ function closeVariantPicker() {
   modal.style.display = "none";
   modal.dataset.cardId = "";
 }
+function printingFields(pr, finish) {
+  return {
+    ...cardFields(resultFromCard(pr, finish)),
+    printId: pr.id, finish, setName: pr.set_name + " #" + pr.collector_number, variant: variantLabel(pr, finish) || null,
+  };
+}
 function choosePrinting(cardId, printId, finish) {
   const pr = (openVariantPicker.prints || {})[printId];
   if (!pr || state.draftStarted) return;
-  eventRef.child("prizePool/" + cardId).update({
-    ...cardFields(resultFromCard(pr, finish)),
-    printId, finish, setName: pr.set_name + " #" + pr.collector_number, variant: variantLabel(pr, finish) || null,
-  });
+  eventRef.child("prizePool/" + cardId).update(printingFields(pr, finish));
   closeVariantPicker();
 }
 async function resetPrinting(cardId) {
@@ -735,29 +738,50 @@ async function backfillCardDetails() {
   backfillCardDetails.running = false;
 }
 
-async function addBulkCards(text) {
-  const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
-  if (!lines.length) return;
-  const entries = lines.map((name) => ({ key: newKey("events/" + eventCode + "/prizePool"), name }));
+// Reads one pool line. Besides a plain name, accepts the usual card-list
+// format "2 Card Name (SET) 123 *F*": an optional count, the set code and
+// collector number of the exact printing, and *F* (foil) or *E* (etched).
+function parseCardLine(line) {
+  // A leading count up to 20; bigger numbers are part of a name ("1996 World Champion").
+  let m = line.match(/^(\d+)x?\s+(.+)$/i);
+  if (m && parseInt(m[1]) > 20) m = null;
+  const qty = m ? Math.max(parseInt(m[1]), 1) : 1;
+  let rest = m ? m[2] : line;
+  let finish = null;
+  m = rest.match(/^(.*?)\s*\*([FE])\*\s*$/i);
+  if (m) { rest = m[1]; finish = m[2].toUpperCase() === "F" ? "foil" : "etched"; }
+  m = rest.match(/^(.+?)\s+\(([A-Za-z0-9]{2,6})\)\s+(\S+)$/);
+  if (m) return { qty, name: m[1].trim(), set: m[2].toLowerCase(), number: m[3], finish };
+  return { qty, name: rest.trim(), set: null, number: null, finish };
+}
+async function lookupCardLine(entry) {
+  if (!entry.set && !entry.finish) return cardFields(await fetchCardImage(entry.name));
+  let res = entry.set
+    ? await scryfallGet("https://api.scryfall.com/cards/" + entry.set + "/" + encodeURIComponent(entry.number))
+    : { status: 0 };
+  // Misread set/number (or a name-only foil line): fall back to the name.
+  if (!res.data) res = await scryfallGet("https://api.scryfall.com/cards/named?fuzzy=" + encodeURIComponent(entry.name));
+  if (!res.data) return cardFields(res.status === 404 ? { url: null, notACard: true } : { url: null });
+  const finishes = res.data.finishes || ["nonfoil"];
+  const finish = finishes.includes(entry.finish || "nonfoil") ? entry.finish || "nonfoil" : finishes[0];
+  return { ...printingFields(res.data, finish), name: res.data.name };
+}
+async function addCardLines(lines) {
+  const entries = lines.map(parseCardLine).filter((e2) => e2.name)
+    .flatMap((e2) => Array.from({ length: e2.qty }, () => ({ ...e2, key: newKey("events/" + eventCode + "/prizePool") })));
+  if (!entries.length) return;
   const updates = {};
-  entries.forEach((e2) => { updates["prizePool/" + e2.key] = { name: e2.name, addedAt: Date.now(), imageStatus: "loading" }; });
+  entries.forEach((e2, i) => { updates["prizePool/" + e2.key] = { name: e2.name, addedAt: Date.now() + i, imageStatus: "loading" }; });
   eventRef.update(updates);
   // Scryfall asks for polite spacing between requests, so we look these up
   // one at a time in the background rather than all at once.
   for (const e2 of entries) {
-    const result = await fetchCardImage(e2.name);
-    eventRef.child("prizePool/" + e2.key).update(cardFields(result));
+    eventRef.child("prizePool/" + e2.key).update(await lookupCardLine(e2));
     await sleep(250);
   }
 }
-async function addSingleCard(name) {
-  name = name.trim();
-  if (!name) return;
-  const key = newKey("events/" + eventCode + "/prizePool");
-  eventRef.child("prizePool/" + key).set({ name, addedAt: Date.now(), imageStatus: "loading" });
-  const result = await fetchCardImage(name);
-  eventRef.child("prizePool/" + key).update(cardFields(result));
-}
+function addBulkCards(text) { return addCardLines(text.split("\n").map((l) => l.trim()).filter(Boolean)); }
+function addSingleCard(name) { return name.trim() ? addCardLines([name.trim()]) : undefined; }
 async function retryMissingImages() {
   const pool = state.prizePool || {};
   // Only retry genuine transient failures — not entries Scryfall has
