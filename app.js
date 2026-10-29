@@ -577,7 +577,8 @@ function resultFromCard(data, finish) {
   const priceUsd = finish ? finishPrice(data.prices, finish) : usdOf(data.prices);
   const face = (data.card_faces && data.card_faces[0]) || {};
   const colors = (data.colors || face.colors || []).join("");
-  return { url, notACard: !url, priceUsd, rarity: data.rarity || null, colors };
+  const setName = data.set_name ? data.set_name + " #" + data.collector_number : null;
+  return { url, notACard: !url, priceUsd, rarity: data.rarity || null, colors, setName };
 }
 async function fetchCardImage(name) {
   const { status, data } = await scryfallGet("https://api.scryfall.com/cards/named?fuzzy=" + encodeURIComponent(name));
@@ -618,9 +619,12 @@ function variantLabel(card, finish) {
   if ((card.frame === "1993" || card.frame === "1997") && (card.released_at || "") >= "2020") bits.push("Retro frame");
   return bits.join(" · ");
 }
-function variantTagHTML(c) {
-  if (!c.variant && !c.setName) return "";
-  return `<span class="variant-tag" title="${esc(c.setName || "")}">${esc(c.variant || c.setName)}</span>`;
+// full: the prize pool list shows set and number too, e.g. "The Hobbit #49 - Foil";
+// the draft grid and results just show the variant.
+function variantTagHTML(c, full) {
+  const text = full ? [c.setName, c.variant].filter(Boolean).join(" - ") : c.variant;
+  if (!text) return "";
+  return `<span class="variant-tag" title="${esc(c.setName || "")}">${esc(text)}</span>`;
 }
 async function openVariantPicker(cardId) {
   const c = (state.prizePool || {})[cardId];
@@ -690,7 +694,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 function statusFor(result) { return result.url ? "found" : result.notACard ? "not_a_card" : "none"; }
 function cardFields(result) {
   return { imageUrl: result.url, imageStatus: statusFor(result), priceUsd: result.priceUsd ?? null,
-           rarity: result.rarity ?? null, colors: result.colors ?? null };
+           rarity: result.rarity ?? null, colors: result.colors ?? null, setName: result.setName ?? null };
 }
 
 // Prize grid sort. Each viewer picks their own order; exotic (unpriced)
@@ -1292,7 +1296,7 @@ function renderPrizes() {
         <div class="list-item">
           <span style="display:flex;align-items:center;gap:9px;min-width:0;">
             ${cardVisualHTML(c, "thumb")}
-            <span>${esc(c.name)}${variantTagHTML(c)}</span>
+            <span>${esc(c.name)}${variantTagHTML(c, true)}</span>
           </span>
           <span style="display:flex;align-items:center;gap:8px;">
             ${c.imageStatus === "found" ? `<button class="variant-btn" data-variant="${c.id}" title="Choose the printing and finish">✨ ${c.printId ? "Change" : "Variant"}</button>` : ""}
