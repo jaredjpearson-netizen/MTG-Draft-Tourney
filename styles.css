@@ -155,6 +155,17 @@ input::placeholder, textarea::placeholder { color: #9c917a; }
 .games-count { width: 18px; text-align: center; font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; }
 .games-count.ahead { color: var(--gold); }
 
+.round-picker { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.round-picker:empty { display: none; }
+.round-pill {
+  padding: 4px 11px; border-radius: 999px; border: 1px solid var(--parchment-line); background: var(--cream);
+  color: var(--ink-soft); font-family: 'Inter', sans-serif; font-size: 12.5px; font-weight: 600; cursor: pointer;
+}
+.round-pill:hover { border-color: var(--gold); color: var(--ink); }
+.round-pill.active { background: var(--gold-bright); border-color: var(--gold); color: var(--felt-deep); }
+.match-row .final-score { color: var(--ink); font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.match-row .pname.won { font-weight: 700; }
+
 .standing-row {
   display: flex; justify-content: space-between; align-items: center; background: var(--cream);
   border: 1px solid var(--parchment-line); border-radius: 8px; padding: 8px 11px; font-size: 13.5px; margin-bottom: 6px;

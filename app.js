@@ -13,6 +13,7 @@ let eventCode = null;
 let eventRef = null;
 let state = {}; // live mirror of the event's DB node
 let activeTab = "players";
+let viewedRoundKey = null; // a past round being looked back at on the Tournament tab; null = current round
 
 /* ---------------------------------------------------------
    Join / create event
@@ -597,12 +598,35 @@ function renderTournament() {
   const complete = last ? last.matches.every(matchComplete) : true;
   const done = rounds.length >= totalRounds && complete;
 
-  document.getElementById("roundTitle").textContent = done ? "Final round" : `Round ${rounds.length} of ${totalRounds}`;
-  document.getElementById("roundSub").textContent = done ? "All rounds complete — head to Prize draft when you're ready." : "Record games won by each player (best of 3).";
+  // Looking back at an earlier round? Show it read-only instead of the current one.
+  const viewed = rounds.find((r) => r.key === viewedRoundKey && r !== last);
+  if (!viewed) viewedRoundKey = null;
+
+  const picker = document.getElementById("roundPicker");
+  picker.innerHTML = "";
+  if (rounds.length > 1) {
+    rounds.forEach((r, i) => {
+      const isActive = viewed ? r === viewed : r === last;
+      const label = r === last && !done ? `Round ${i + 1} (current)` : `Round ${i + 1}`;
+      picker.appendChild(el(`<button class="round-pill ${isActive ? "active" : ""}" data-view-round="${r === last ? "" : r.key}">${label}</button>`));
+    });
+  }
+  document.getElementById("roundActions").style.display = viewed ? "none" : "flex";
 
   const matchesList = document.getElementById("matchesList");
   matchesList.innerHTML = "";
-  if (last) {
+
+  if (viewed) {
+    const n = rounds.indexOf(viewed) + 1;
+    document.getElementById("roundTitle").textContent = `Round ${n} of ${totalRounds}`;
+    document.getElementById("roundSub").textContent = "Earlier round, view only.";
+    viewed.matches.forEach((m) => matchesList.appendChild(pastMatchRow(m)));
+  } else {
+    document.getElementById("roundTitle").textContent = done ? "Final round" : `Round ${rounds.length} of ${totalRounds}`;
+    document.getElementById("roundSub").textContent = done ? "All rounds complete — head to Prize draft when you're ready." : "Record games won by each player (best of 3).";
+  }
+
+  if (last && !viewed) {
     last.matches.forEach((m) => {
       if (m.bye) {
         matchesList.appendChild(el(`
@@ -644,6 +668,23 @@ function renderTournament() {
         <span class="pts">${s.wins}-${s.losses}${s.draws ? "-" + s.draws : ""} · ${s.points} pts</span>
       </div>`));
   });
+}
+
+function pastMatchRow(m) {
+  if (m.bye) {
+    return el(`
+      <div class="match-row">
+        <span class="pname">${esc(nameOf(m.p1))}</span>
+        <span style="font-size:12.5px;color:var(--ink-soft);font-style:italic;">bye — automatic win</span>
+      </div>`);
+  }
+  const p1w = m.p1Wins || 0, p2w = m.p2Wins || 0;
+  return el(`
+    <div class="match-row">
+      <span class="pname ${p1w > p2w ? "won" : ""}" style="grid-column:1;grid-row:1;">${esc(nameOf(m.p1))}</span>
+      <span class="final-score" style="grid-column:2;grid-row:1;justify-self:center;">${p1w} – ${p2w}</span>
+      <span class="pname right ${p2w > p1w ? "won" : ""}" style="grid-column:3;grid-row:1;">${esc(nameOf(m.p2))}</span>
+    </div>`);
 }
 
 function pct(n) { return (n * 100).toFixed(1) + "%"; }
@@ -811,7 +852,7 @@ document.getElementById("tournamentCostInput").addEventListener("change", (e) =>
   eventRef.child("tournamentCost").set(v ? (v.startsWith("$") ? v : "$" + v) : "");
 });
 document.getElementById("paymentEmailInput").addEventListener("change", (e) => eventRef.child("paymentEmail").set(e.target.value.trim()));
-document.getElementById("nextRoundBtn").addEventListener("click", nextRound);
+document.getElementById("nextRoundBtn").addEventListener("click", () => { viewedRoundKey = null; nextRound(); });
 document.getElementById("resetTournamentBtn").addEventListener("click", () => {
   if (confirm("Reset the tournament? This clears all rounds and results.")) resetTournament();
 });
@@ -842,6 +883,9 @@ document.querySelectorAll(".tab").forEach((tab) => {
 document.getElementById("app").addEventListener("click", (e) => {
   const rm = e.target.closest("[data-remove-player]");
   if (rm) return removePlayer(rm.dataset.removePlayer);
+
+  const vr = e.target.closest("[data-view-round]");
+  if (vr) { viewedRoundKey = vr.dataset.viewRound || null; return render(); }
 
   const gm = e.target.closest("[data-game]");
   if (gm) { const [rk, mid, side, delta] = gm.dataset.game.split("|"); return setGameWins(rk, mid, side, parseInt(delta)); }
