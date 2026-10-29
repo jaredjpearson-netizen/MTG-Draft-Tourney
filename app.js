@@ -536,30 +536,40 @@ function resetTournament() { eventRef.update({ started: false, rounds: {} }); }
      - Any other failure (network hiccup, rate-limit exhausted, etc.) is
        transient — we retry a couple of times, and if it still fails we
        flag it as "missing" so the organizer can retry it manually later.
-   Returns { url, notACard }. */
-async function fetchCardImage(name, attempt) {
-  attempt = attempt || 0;
-  try {
-    const res = await fetch("https://api.scryfall.com/cards/named?fuzzy=" + encodeURIComponent(name));
-    if (res.status === 429 && attempt < 3) {
-      await sleep(600 * (attempt + 1));
-      return fetchCardImage(name, attempt + 1);
+   fetchCardImage returns { url, notACard, priceUsd }, plus failed: true when Scryfall couldn't be reached. */
+// GET from Scryfall, backing off politely if it says we're going too fast
+// (HTTP 429), honouring its Retry-After header when it sends one.
+async function scryfallGet(url) {
+  for (let attempt = 0; ; attempt++) {
+    let res;
+    try { res = await fetch(url); }
+    catch (e) { if (attempt < 2) { await sleep(800); continue; } return { status: 0 }; }
+    if (res.status === 429 && attempt < 5) {
+      const wait = (parseFloat(res.headers.get("Retry-After")) || 0) * 1000 || 1000 * 2 ** attempt;
+      console.log("[MTG draft] Scryfall asked us to slow down — waiting", wait, "ms");
+      await sleep(wait);
+      continue;
     }
-    if (res.status === 404) return { url: null, notACard: true };
-    if (!res.ok) return { url: null, notACard: false };
-    const data = await res.json();
-    let url = null;
-    if (data.image_uris && data.image_uris.normal) url = data.image_uris.normal;
-    else if (data.card_faces && data.card_faces[0] && data.card_faces[0].image_uris) url = data.card_faces[0].image_uris.normal;
-    // Scryfall's prices are USD market prices for the default printing;
-    // fall back to the foil/etched price for cards that only exist that way.
-    const p = data.prices || {};
-    const usd = parseFloat(p.usd || p.usd_foil || p.usd_etched);
-    return { url, notACard: !url, priceUsd: isNaN(usd) ? null : usd };
-  } catch (e) {
-    if (attempt < 2) { await sleep(600); return fetchCardImage(name, attempt + 1); }
-    return { url: null, notACard: false };
+    if (!res.ok) return { status: res.status };
+    return { status: res.status, data: await res.json() };
   }
+}
+function usdOf(prices) {
+  const p = prices || {};
+  const usd = parseFloat(p.usd || p.usd_foil || p.usd_etched);
+  return isNaN(usd) ? null : usd;
+}
+async function fetchCardImage(name) {
+  const { status, data } = await scryfallGet("https://api.scryfall.com/cards/named?fuzzy=" + encodeURIComponent(name));
+  if (status === 404) return { url: null, notACard: true };
+  if (!data) return { url: null, notACard: false, failed: true, status };
+  let url = null;
+  if (data.image_uris && data.image_uris.normal) url = data.image_uris.normal;
+  else if (data.card_faces && data.card_faces[0] && data.card_faces[0].image_uris) url = data.card_faces[0].image_uris.normal;
+  // Scryfall's prices are USD market prices for the card's default printing;
+  // fall back to the foil/etched price for cards that only exist that way.
+  const priceUsd = usdOf(data.prices);
+  return { url, notACard: !url, priceUsd };
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 function statusFor(result) { return result.url ? "found" : result.notACard ? "not_a_card" : "none"; }
@@ -577,7 +587,7 @@ async function addBulkCards(text) {
   for (const e2 of entries) {
     const result = await fetchCardImage(e2.name);
     eventRef.child("prizePool/" + e2.key).update(cardFields(result));
-    await sleep(180);
+    await sleep(250);
   }
 }
 async function addSingleCard(name) {
@@ -597,19 +607,29 @@ async function retryMissingImages() {
     eventRef.child("prizePool/" + id + "/imageStatus").set("loading");
     const result = await fetchCardImage(c.name);
     eventRef.child("prizePool/" + id).update(cardFields(result));
-    await sleep(180);
+    await sleep(250);
   }
 }
 // Re-checks Scryfall prices for every real card in the pool (also fills in
 // prices for cards added before prices existed). Hand-entered prices win.
-async function refreshPrices() {
+async function refreshPrices(onProgress) {
   const pool = state.prizePool || {};
   const cards = Object.entries(pool).filter(([, c]) => c.imageStatus !== "not_a_card");
-  for (const [id, c] of cards) {
+  const tally = { priced: 0, noPrice: [], failed: [] };
+  for (const [i, [id, c]] of cards.entries()) {
+    if (onProgress) onProgress(i + 1, cards.length);
     const result = await fetchCardImage(c.name);
-    if (result.url || result.priceUsd != null) eventRef.child("prizePool/" + id).update(cardFields(result));
-    await sleep(180);
+    if (result.failed) {
+      tally.failed.push(c.name);
+      console.warn("[MTG draft] Price lookup failed for", c.name, "(HTTP " + result.status + ")");
+    } else {
+      eventRef.child("prizePool/" + id).update(cardFields(result));
+      if (result.priceUsd != null) tally.priced++;
+      else tally.noPrice.push(c.name);
+    }
+    await sleep(250);
   }
+  return tally;
 }
 function setManualPrice(id) {
   const c = (state.prizePool || {})[id];
@@ -1101,7 +1121,13 @@ function renderPrizes() {
   cardsGrid.innerHTML = "";
   cardsGrid.style.display = draftComplete ? "none" : "grid";
   if (!draftComplete) {
-    remaining.forEach((c) => {
+    // Exotic (unpriced) prizes first, then most valuable to least.
+    const byValue = remaining.slice().sort((a, b) => {
+      const va = cardCad(a), vb = cardCad(b);
+      if (va == null || vb == null) return (va == null ? 0 : 1) - (vb == null ? 0 : 1);
+      return vb - va;
+    });
+    byValue.forEach((c) => {
       cardsGrid.appendChild(el(`
         <button class="card-tile" data-claim="${c.id}">
           ${cardVisualHTML(c, "tile")}
@@ -1180,9 +1206,13 @@ document.getElementById("addBulkBtn").addEventListener("click", () => {
 document.getElementById("retryImagesBtn").addEventListener("click", () => retryMissingImages());
 document.getElementById("refreshPricesBtn").addEventListener("click", async (e) => {
   const btn = e.currentTarget;
-  btn.disabled = true; btn.textContent = "💲 Updating prices…";
-  await refreshPrices();
+  btn.disabled = true;
+  const t = await refreshPrices((n, total) => { btn.textContent = `💲 Updating prices… ${n}/${total}`; });
   btn.disabled = false; btn.textContent = "💲 Update prices";
+  let msg = `Prices updated for ${t.priced} card${t.priced === 1 ? "" : "s"}.`;
+  if (t.noPrice.length) msg += `\n\nScryfall has no price for: ${t.noPrice.join(", ")}. Tap their price to type one in.`;
+  if (t.failed.length) msg += `\n\nCouldn't reach Scryfall for: ${t.failed.join(", ")}. Try Update prices again in a minute.`;
+  alert(msg);
 });
 document.getElementById("addSingleBtn").addEventListener("click", () => {
   const input = document.getElementById("singleCardInput");
