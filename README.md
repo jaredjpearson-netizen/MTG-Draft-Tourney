@@ -194,6 +194,13 @@ hosted.)
   player's haul show totals. Tap a price in the prize pool list to type your
   own, e.g. for booster packs, which Scryfall can't price. **Update prices**
   re-checks every card.
+- **Adding exact printings in bulk**: Bulk add also understands the usual
+  card-list format, `2 Card Name (SET) 123 *F*` (optional count, set code and
+  collector number, `*F*` foil or `*E*` etched), as exported by ManaBox,
+  Moxfield and similar apps. To build the list from photos of the cards,
+  give the photos to Claude with a prompt like: "List every Magic card in
+  these photos, one per line, as `Name (SET) collector-number`, adding `*F*`
+  if it looks foil." Then spot-check foils and anything misread.
 - **Card variants**: before the draft starts, tap **✨ Variant** next to a card
   in the prize pool to pick its exact printing and finish (foil, etched,
   showcase, borderless, full art and so on). The card's picture and price
