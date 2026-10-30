@@ -216,6 +216,12 @@ hosted.)
 - **Pick emails switch**: the checkbox at the top of the Prize draft tab turns
   the "your turn to pick" emails on or off, which saves most of the EmailJS
   monthly quota (200 emails/month) when everyone's in the same room.
+  Next to it, choose when the email goes out: right away, or only if the
+  player still hasn't picked after 10 minutes, 30 minutes (the default) or
+  1 hour. There's no server, so the delayed email is sent by whichever
+  browser has the event open when the time is up. Keep one browser (the
+  organizer's, say) open on the event during a remote draft. If none is
+  open, the email goes out as soon as someone opens it.
 - **Manage tournaments** (link on the start screen) lists every tournament,
   newest first, with its status. You can open or delete any of them. It's
   locked by the master password (see setup below). Each event is tiny, so

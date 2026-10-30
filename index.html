@@ -6,7 +6,7 @@
 <title>Magic Draft Tourney</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23152C26'/%3E%3Cpath d='M32 9 L38 26 L55 32 L38 38 L32 55 L26 38 L9 32 L26 26 Z' fill='%23E4C24C'/%3E%3C/svg%3E" />
 <!-- Bump the ?v= numbers below whenever styles.css or app.js change, so browsers fetch the new files instead of a cached copy. -->
-<link rel="stylesheet" href="styles.css?v=6" />
+<link rel="stylesheet" href="styles.css?v=7" />
 </head>
 <body>
 
@@ -153,10 +153,18 @@
 
     <!-- PRIZE DRAFT TAB -->
     <div class="tab-page" id="page-prizes">
-      <label class="toggle-row">
-        <input type="checkbox" id="pickEmailsToggle" checked />
-        Email each player when it's their turn to pick
-      </label>
+      <div class="email-row">
+        <label class="toggle-row">
+          <input type="checkbox" id="pickEmailsToggle" checked />
+          Email each player when it's their turn to pick
+        </label>
+        <select id="pickEmailDelay" title="Only email if they haven't picked by then">
+          <option value="0">right away</option>
+          <option value="10">if no pick after 10 min</option>
+          <option value="30">if no pick after 30 min</option>
+          <option value="60">if no pick after 1 hour</option>
+        </select>
+      </div>
       <div id="prizeSetupView">
         <h2 class="section-title">Prize pool</h2>
         <p class="section-sub">Bulk-add one card per line, or drop them in one at a time. To add an exact printing, use <code>Card Name (SET) 123</code> with the set code and collector number, plus <code>*F*</code> for foil or <code>*E*</code> for etched. Prices are Scryfall market prices converted to Canadian dollars. Tap a price to type your own (useful for booster packs). Draft order follows the tournament ranking, top to bottom, looping back to the top until every card is claimed.</p>
@@ -232,6 +240,6 @@
 <script src="firebase-config.js"></script>
 <script src="emailjs-prizedraft-config.js"></script>
 <script src="emailjs-start-config.js"></script>
-<script src="app.js?v=9"></script>
+<script src="app.js?v=10"></script>
 </body>
 </html>

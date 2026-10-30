@@ -893,7 +893,7 @@ function beginDraft() {
   const pool = state.prizePool || {};
   const players = playersArray();
   if (Object.keys(pool).length === 0 || players.length === 0) return;
-  eventRef.update({ draftStarted: true, claims: {}, pickOrderSnapshot: computeBaseOrder(), notifiedPick: -1 });
+  eventRef.update({ draftStarted: true, claims: {}, pickOrderSnapshot: computeBaseOrder(), notifiedPick: -1, turnStartedAt: Date.now() });
 }
 
 function currentPickerId() {
@@ -935,12 +935,13 @@ async function claimCard(cardId) {
   const claimed = Object.values(state.claims || {}).some((c) => c.cardId === cardId);
   if (claimed || currentPickerId() !== picker) { alert("The draft moved on while you were deciding. Have another look."); return; }
   const key = newKey("events/" + eventCode + "/claims");
-  eventRef.child("claims/" + key).set({ cardId, playerId: picker, ts: Date.now() });
+  const now = Date.now();
+  eventRef.update({ ["claims/" + key]: { cardId, playerId: picker, ts: now }, turnStartedAt: now });
 }
 function undoLastPick() {
   const claims = Object.entries(state.claims || {}).sort((a, b) => (a[1].ts || 0) - (b[1].ts || 0));
   if (!claims.length) return;
-  eventRef.child("claims/" + claims[claims.length - 1][0]).remove();
+  eventRef.update({ ["claims/" + claims[claims.length - 1][0]]: null, turnStartedAt: Date.now() });
 }
 function resetPrizeDraft() { eventRef.update({ draftStarted: false, claims: {}, pickOrderSnapshot: null, notifiedPick: -1 }); }
 
@@ -965,6 +966,15 @@ function sendPickEmail(player) {
 // Called on every render while the draft is active. Uses a Firebase
 // transaction as a lock so that even with several browsers/tabs open on
 // the same event, only one of them actually sends the email for a given pick.
+function pickEmailDelayMin() { return state.pickEmailDelayMin ?? 30; }
+// When the current turn began. Drafts started before this was recorded fall
+// back to the last pick's time.
+function turnStartTime() {
+  if (state.turnStartedAt) return state.turnStartedAt;
+  const ts = Object.values(state.claims || {}).map((c) => c.ts || 0);
+  return ts.length ? Math.max(...ts) : Date.now();
+}
+setInterval(() => { if (eventRef && state.draftStarted) notifyCurrentPickerIfNeeded(); }, 60000);
 function notifyCurrentPickerIfNeeded() {
   if (!state.draftStarted) return;
   if (state.pickEmailsOff) return; // organizer turned turn emails off (e.g. everyone's in the room)
@@ -976,6 +986,12 @@ function notifyCurrentPickerIfNeeded() {
   if (!pickerId) return;
   const player = (state.players || {})[pickerId];
   if (!player || !player.email) { console.log("[MTG draft] Current picker has no email on file — skipping notification."); return; }
+  // Optional delay: only email if they still haven't picked after N minutes.
+  // There's no server, so the open browsers check once a minute (see the
+  // interval below); the email goes out from whichever one notices first.
+  if ((state.notifiedPick ?? -1) >= claimsCount) return;
+  const delayMs = pickEmailDelayMin() * 60000;
+  if (delayMs && Date.now() - turnStartTime() < delayMs) return;
 
   eventRef.child("notifiedPick").transaction((current) => {
     if (typeof current !== "number") current = -1;
@@ -1297,6 +1313,9 @@ function renderPrizes() {
   const pool = Object.entries(state.prizePool || {}).map(([id, v]) => ({ id, ...v })).sort((a, b) => (a.addedAt || 0) - (b.addedAt || 0));
   const draftStarted = !!state.draftStarted;
   document.getElementById("pickEmailsToggle").checked = !state.pickEmailsOff;
+  const delaySelect = document.getElementById("pickEmailDelay");
+  delaySelect.value = String(pickEmailDelayMin());
+  delaySelect.disabled = !!state.pickEmailsOff;
 
   document.getElementById("prizeSetupView").style.display = draftStarted ? "none" : "block";
   document.getElementById("prizeActiveView").style.display = draftStarted ? "block" : "none";
@@ -1488,6 +1507,10 @@ document.getElementById("pickEmailsToggle").addEventListener("change", async (e)
   const on = e.target.checked;
   if (!(await requireOrganizer())) { e.target.checked = !on; return; }
   eventRef.child("pickEmailsOff").set(on ? null : true);
+});
+document.getElementById("pickEmailDelay").addEventListener("change", async (e) => {
+  if (!(await requireOrganizer())) { e.target.value = String(pickEmailDelayMin()); return; }
+  eventRef.child("pickEmailDelayMin").set(parseInt(e.target.value));
 });
 
 document.querySelectorAll(".tab").forEach((tab) => {
