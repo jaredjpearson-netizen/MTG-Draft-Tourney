@@ -378,3 +378,10 @@ input::placeholder, textarea::placeholder { color: #9c917a; }
 .picker-banner.my-turn { background: var(--gold-bright); }
 .cards-grid.locked .card-tile { opacity: .6; cursor: not-allowed; }
 .cards-grid.locked .card-tile:hover { transform: none; box-shadow: none; }
+
+.email-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin-bottom: 14px; }
+.email-row .toggle-row { margin-bottom: 0; }
+.email-row select {
+  padding: 3px 6px; border-radius: 7px; border: 1px solid var(--parchment-line); background: var(--cream);
+  color: var(--ink); font-family: 'Inter', sans-serif; font-size: 12.5px;
+}
