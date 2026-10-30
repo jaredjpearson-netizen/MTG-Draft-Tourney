@@ -133,6 +133,11 @@ else in the app depends on it.
    `main`, folder `/ (root)`. Save.
 5. GitHub will give you a URL like `https://yourusername.github.io/mtg-draft-night/`
    within a minute or two. That's your app.
+6. Every merge to `main` redeploys automatically (watch it under the repo's
+   **Actions** tab, "pages build and deployment"). Occasionally GitHub skips
+   a build. If a merge hasn't shown up after ~10 minutes and no new run
+   appears in Actions, any new commit to `main` (even a small README edit)
+   triggers a fresh deploy.
 
 (Netlify or Cloudflare Pages work the same way if you'd rather drag-and-drop the
 folder instead of using GitHub — either is fine, this app doesn't care how it's
