@@ -84,8 +84,12 @@ function openEvent(code) {
     if (eventRef !== thisRef) return; // we've already left this event
     if (hadData && !snap.exists()) { leaveEvent(); alert("This event was deleted by the organizer."); return; }
     if (snap.exists()) hadData = true;
+    const wasDraftStarted = !!state.draftStarted;
     state = snap.val() || {};
     if (!initialTabSet) { activeTab = computeDefaultTab(); initialTabSet = true; }
+    // If the prize draft starts while someone already has the event open,
+    // bring them to the Prize draft tab once; they can still switch away.
+    else if (!wasDraftStarted && state.draftStarted) { activeTab = "prizes"; }
     joinScreen.style.display = "none";
     appRoot.style.display = "block";
     render();
