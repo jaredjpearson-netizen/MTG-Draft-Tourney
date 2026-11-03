@@ -167,8 +167,8 @@
       </div>
       <div id="prizeSetupView">
         <h2 class="section-title">Prize pool</h2>
-        <p class="section-sub">Bulk-add one card per line, or drop them in one at a time. To add an exact printing, use <code>Card Name (SET) 123</code> with the set code and collector number, plus <code>*F*</code> for foil or <code>*E*</code> for etched. Prices are Scryfall market prices converted to Canadian dollars. Tap a price to type your own (useful for booster packs). Draft order follows the tournament ranking, top to bottom, looping back to the top until every card is claimed.</p>
-        <textarea id="bulkCardsInput" rows="4" placeholder="Sheoldred, the Apocalypse&#10;Ragavan, Nimble Pilferer (MH2) 138 *F*&#10;Wrenn and Six"></textarea>
+        <p class="section-sub">Bulk-add one card per line, or drop them in one at a time. To add an exact printing, use <code>Card Name (SET) 123</code> with the set code and collector number, plus <code>*F*</code> for foil or <code>*E*</code> for etched. Prices are Scryfall market prices converted to Canadian dollars. Tap a price to type your own (useful for booster packs). To tag who drafted each card, put a player's name on its own line ending in a colon (<code>Alex:</code>) above their cards, or start a line with <code>Alex: Card Name</code>. Tap 🙋 on a card to change it. Draft order follows the tournament ranking, top to bottom, looping back to the top until every card is claimed.</p>
+        <textarea id="bulkCardsInput" rows="4" placeholder="Alex:&#10;Sheoldred, the Apocalypse&#10;Ragavan, Nimble Pilferer (MH2) 138 *F*&#10;Bea:&#10;Wrenn and Six"></textarea>
         <div class="field-row" style="margin-top:8px;">
           <button class="btn small" id="addBulkBtn">Add lines to pool</button>
         </div>
@@ -177,6 +177,7 @@
           <button class="btn" id="addSingleBtn">+</button>
         </div>
         <div id="poolHeader" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"></div>
+        <div id="drafterSummary"></div>
         <div id="poolList" style="display:flex;flex-direction:column;gap:6px;max-height:220px;overflow-y:auto;margin-bottom:10px;"></div>
         <div class="field-row">
           <button class="btn small wine" id="retryImagesBtn" style="display:none;">🔄 Retry missing card images</button>

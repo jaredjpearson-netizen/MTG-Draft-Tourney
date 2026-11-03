@@ -206,6 +206,32 @@ hosted.)
   give the photos to Claude with a prompt like: "List every Magic card in
   these photos, one per line, as `Name (SET) collector-number`, adding `*F*`
   if it looks foil." Then spot-check foils and anything misread.
+- **Who drafted each card**: each prize card can be tagged with the player
+  who drafted it. In Bulk add, put a player's name on its own line ending in
+  a colon, and every card below it is tagged with that player until the next
+  name line:
+
+  ```
+  Alex:
+  Sheoldred, the Apocalypse (DMU) 107
+  Sol Ring (SLD) 1512 *E*
+  Bea:
+  Ragavan, Nimble Pilferer (MH2) 138 *F*
+  ```
+
+  A single line like `Alex: Sol Ring` works too, when Alex is a registered
+  player. A name that matches a registered player (ignoring capitals) is saved
+  with that player's spelling. The pool shows a count per drafter so you can
+  check nobody's cards are missing, and the tag shows on the draft tiles and
+  in each player's haul. Tap 🙋 next to a card in the pool to change or clear
+  its tag.
+- **From photos to a tagged list**: take one photo (or a few) of each
+  player's rares and name each file after the player, e.g. `Alex.jpg`,
+  `Bea 2.jpg`. Give all the photos to Claude and ask for "the prize pool
+  list, grouped by the player named in each file name". Claude replies with
+  one `Name:` block per player, ready to paste into Bulk add. If file names
+  don't come through, put a slip of paper with the player's name in each
+  photo instead.
 - **Card variants**: before the draft starts, tap **✨ Variant** next to a card
   in the prize pool to pick its exact printing and finish (foil, etched,
   showcase, borderless, full art and so on). The card's picture and price
