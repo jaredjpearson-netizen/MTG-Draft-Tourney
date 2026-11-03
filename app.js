@@ -504,16 +504,25 @@ function setGameWins(roundKey, matchId, side, delta) {
   const field = side === "p1" ? "p1Wins" : "p2Wins";
   const match = ((state.rounds || {})[roundKey]?.matches || {})[matchId] || {};
   const next = Math.max(0, Math.min(2, (match[field] || 0) + delta));
-  eventRef.child("rounds/" + roundKey + "/matches/" + matchId + "/" + field).set(next);
+  // Changing the game count reopens a match that was recorded as a draw.
+  eventRef.child("rounds/" + roundKey + "/matches/" + matchId).update({ [field]: next, draw: null });
+}
+// A draw (e.g. time called at 1-1 or 0-0) is only possible when games are level.
+function canDraw(m) { const a = m.p1Wins || 0, b = m.p2Wins || 0; return a === b && a < 2; }
+function setDraw(roundKey, matchId, on) {
+  const match = ((state.rounds || {})[roundKey]?.matches || {})[matchId] || {};
+  if (on && !canDraw(match)) return;
+  eventRef.child("rounds/" + roundKey + "/matches/" + matchId + "/draw").set(on ? true : null);
 }
 // The winner of a finished match (or the player with a bye); null otherwise.
 function matchWinner(m) {
   if (m.bye) return m.p1;
-  if (!matchComplete(m)) return null;
+  if (!matchComplete(m) || isDraw(m)) return null;
   return (m.p1Wins || 0) > (m.p2Wins || 0) ? m.p1 : m.p2;
 }
 function trophy() { return `<span class="win-trophy" title="Winner">🏆</span>`; }
-function matchComplete(m) { return m.bye || (m.p1Wins || 0) >= 2 || (m.p2Wins || 0) >= 2; }
+function isDraw(m) { return !m.bye && !!m.draw && canDraw(m); }
+function matchComplete(m) { return m.bye || isDraw(m) || (m.p1Wins || 0) >= 2 || (m.p2Wins || 0) >= 2; }
 
 function nextRound() {
   const rounds = roundsArray();
@@ -1160,7 +1169,7 @@ function renderTournament() {
     viewed.matches.forEach((m) => matchesList.appendChild(pastMatchRow(m)));
   } else {
     document.getElementById("roundTitle").textContent = done ? "Final round" : `Round ${rounds.length} of ${totalRounds}`;
-    document.getElementById("roundSub").textContent = done ? "All rounds complete — head to Prize draft when you're ready." : "Record games won by each player (best of 3).";
+    document.getElementById("roundSub").textContent = done ? "All rounds complete — head to Prize draft when you're ready." : "Record games won by each player (best of 3). If time runs out with games level, tap Draw.";
   }
 
   if (last && !viewed) {
@@ -1182,7 +1191,12 @@ function renderTournament() {
               <span class="games-count ${p1w > p2w ? "ahead" : ""}">${p1w}</span>
               <button class="icon-btn" data-game="${last.key}|${m.id}|p1|1" ${p1w >= 2 ? "disabled" : ""}>+</button>
             </div>
-            <span class="games-label" style="grid-column:2;grid-row:2;justify-self:center;">games won</span>
+            <div class="games-mid" style="grid-column:2;grid-row:2;justify-self:center;">
+              <span class="games-label">${isDraw(m) ? "draw" : "games won"}</span>
+              ${isDraw(m)
+                ? `<button class="draw-btn on" data-draw="${last.key}|${m.id}|0" title="Undo draw">Undo draw</button>`
+                : canDraw(m) ? `<button class="draw-btn" data-draw="${last.key}|${m.id}|1" title="Record this match as a draw (1 match point each)">Draw</button>` : ""}
+            </div>
             <div class="games-stepper" style="grid-column:3;grid-row:2;justify-self:end;">
               <button class="icon-btn" data-game="${last.key}|${m.id}|p2|-1" ${p2w <= 0 ? "disabled" : ""}>−</button>
               <span class="games-count ${p2w > p1w ? "ahead" : ""}">${p2w}</span>
@@ -1218,7 +1232,7 @@ function renderTournament() {
 
 // Edit-pairings mode: a player's name becomes a tappable chip when their
 // match has no games recorded yet (byes included), otherwise it's locked.
-function matchUnscored(m) { return m.bye || ((m.p1Wins || 0) + (m.p2Wins || 0)) === 0; }
+function matchUnscored(m) { return m.bye || (!m.draw && ((m.p1Wins || 0) + (m.p2Wins || 0)) === 0); }
 function lastMatchPlayer(round, pick) {
   const m = round && round.matches.find((x) => x.id === pick.matchId);
   return m ? m[pick.side] : null;
@@ -1257,7 +1271,7 @@ function pastMatchRow(m) {
   return el(`
     <div class="match-row">
       <span class="pname ${p1w > p2w ? "won" : ""}" style="grid-column:1;grid-row:1;">${esc(nameOf(m.p1))}${matchWinner(m) === m.p1 ? " " + trophy() : ""}</span>
-      <span class="final-score" style="grid-column:2;grid-row:1;justify-self:center;">${p1w} – ${p2w}</span>
+      <span class="final-score" style="grid-column:2;grid-row:1;justify-self:center;">${p1w} – ${p2w}${isDraw(m) ? ` <span class="draw-tag">draw</span>` : ""}</span>
       <span class="pname right ${p2w > p1w ? "won" : ""}" style="grid-column:3;grid-row:1;">${matchWinner(m) === m.p2 ? trophy() + " " : ""}${esc(nameOf(m.p2))}</span>
     </div>`);
 }
@@ -1550,6 +1564,9 @@ document.getElementById("app").addEventListener("click", (e) => {
 
   const gm = e.target.closest("[data-game]");
   if (gm) { const [rk, mid, side, delta] = gm.dataset.game.split("|"); return setGameWins(rk, mid, side, parseInt(delta)); }
+
+  const dr = e.target.closest("[data-draw]");
+  if (dr) { const [rk, mid, on] = dr.dataset.draw.split("|"); return setDraw(rk, mid, on === "1"); }
 
   const vb = e.target.closest("[data-variant]");
   if (vb) return openVariantPicker(vb.dataset.variant);
