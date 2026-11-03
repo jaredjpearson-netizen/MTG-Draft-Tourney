@@ -1382,6 +1382,7 @@ function renderPrizes() {
   const delaySelect = document.getElementById("pickEmailDelay");
   delaySelect.value = String(pickEmailDelayMin());
   delaySelect.disabled = !!state.pickEmailsOff;
+  document.getElementById("pickEmailRow").style.display = "flex";
 
   document.getElementById("prizeSetupView").style.display = draftStarted ? "none" : "block";
   document.getElementById("prizeActiveView").style.display = draftStarted ? "block" : "none";
@@ -1447,6 +1448,7 @@ function renderPrizes() {
   cardsGrid.innerHTML = "";
   cardsGrid.style.display = draftComplete ? "none" : "grid";
   document.getElementById("prizeSortBar").style.display = draftComplete ? "none" : "flex";
+  document.getElementById("pickEmailRow").style.display = draftComplete ? "none" : "flex";
   const meRow = document.getElementById("whoAmIRow");
   meRow.style.display = draftComplete ? "none" : "flex";
   const meSelect = document.getElementById("whoAmISelect");
