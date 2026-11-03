@@ -797,12 +797,64 @@ async function lookupCardLine(entry) {
   const finish = finishes.includes(entry.finish || "nonfoil") ? entry.finish || "nonfoil" : finishes[0];
   return { ...printingFields(res.data, finish), name: res.data.name };
 }
+// Drafter tags: who drafted each prize card. Stored as a plain name so the
+// pool can be filled before (or without) matching registered players; a name
+// that matches a player (ignoring case) is saved with that player's spelling.
+function canonicalDrafter(name) {
+  const n = (name || "").trim();
+  if (!n) return null;
+  const p = playersArray().find((x) => (x.name || "").trim().toLowerCase() === n.toLowerCase());
+  return p ? p.name : n;
+}
+function isPlayerName(name) {
+  const n = (name || "").trim().toLowerCase();
+  return !!n && playersArray().some((x) => (x.name || "").trim().toLowerCase() === n);
+}
+// Reads the drafter out of the pasted lines. Two ways to tag:
+//   "Alex:" on its own line tags every card below it, until the next name line.
+//   "Alex: Sol Ring" tags one card, when Alex is a registered player. (Only
+//   registered names count inline, so "Circle of Protection: Red" stays a card.)
+function tagDrafters(lines) {
+  let current = null;
+  const out = [];
+  for (const line of lines) {
+    let m = line.match(/^(.{1,40}?)\s*:\s*$/);
+    if (m) { current = canonicalDrafter(m[1]); continue; }
+    m = line.match(/^([^:]{1,40}?)\s*:\s+(.+)$/);
+    if (m && isPlayerName(m[1])) { out.push({ line: m[2].trim(), drafter: canonicalDrafter(m[1]) }); continue; }
+    out.push({ line, drafter: current });
+  }
+  return out;
+}
+function setDrafter(id) {
+  const c = (state.prizePool || {})[id];
+  if (!c) return;
+  const names = playersArray().map((p) => p.name).join(", ");
+  const input = prompt(`Who drafted "${c.name}"? Leave blank to clear.` + (names ? `\nPlayers: ${names}` : ""), c.drafter || "");
+  if (input === null) return;
+  eventRef.child("prizePool/" + id + "/drafter").set(canonicalDrafter(input));
+}
+function drafterTagHTML(c, editable) {
+  if (editable) {
+    return `<button class="drafter-tag${c.drafter ? "" : " empty"}" data-set-drafter="${c.id}" title="Who drafted this card? Tap to change.">🙋 ${esc(c.drafter || "Drafter")}</button>`;
+  }
+  return c.drafter ? `<span class="drafter-tag" title="Drafted by ${esc(c.drafter)}">🙋 ${esc(c.drafter)}</span>` : "";
+}
+function drafterSummaryHTML(cards) {
+  const counts = new Map();
+  let untagged = 0;
+  cards.forEach((c) => { if (c.drafter) counts.set(c.drafter, (counts.get(c.drafter) || 0) + 1); else untagged++; });
+  if (!counts.size) return "";
+  const bits = [...counts.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([n, k]) => `${esc(n)} ${k}`);
+  if (untagged) bits.push(`untagged ${untagged}`);
+  return `<div style="font-size:12.5px;color:var(--ink-soft);margin-bottom:8px;">🙋 Drafted by: ${bits.join(" · ")}</div>`;
+}
 async function addCardLines(lines) {
-  const entries = lines.map(parseCardLine).filter((e2) => e2.name)
+  const entries = tagDrafters(lines).map(({ line, drafter }) => ({ ...parseCardLine(line), drafter })).filter((e2) => e2.name)
     .flatMap((e2) => Array.from({ length: e2.qty }, () => ({ ...e2, key: newKey("events/" + eventCode + "/prizePool") })));
   if (!entries.length) return;
   const updates = {};
-  entries.forEach((e2, i) => { updates["prizePool/" + e2.key] = { name: e2.name, addedAt: Date.now() + i, imageStatus: "loading" }; });
+  entries.forEach((e2, i) => { updates["prizePool/" + e2.key] = { name: e2.name, addedAt: Date.now() + i, imageStatus: "loading", drafter: e2.drafter || null }; });
   eventRef.update(updates);
   // Scryfall asks for polite spacing between requests, so we look these up
   // one at a time in the background rather than all at once.
@@ -1340,6 +1392,7 @@ function renderPrizes() {
       ? `<span style="font-size:13px;color:var(--ink-soft);">${pool.length} card${pool.length === 1 ? "" : "s"} in the pool · ${poolTotalHTML(pool)}</span>
          <button id="clearPoolBtn" style="background:none;border:none;color:var(--wine);font-size:12.5px;cursor:pointer;">Clear all</button>`
       : "";
+    document.getElementById("drafterSummary").innerHTML = drafterSummaryHTML(pool);
     const poolList = document.getElementById("poolList");
     poolList.innerHTML = "";
     pool.forEach((c) => {
@@ -1350,6 +1403,7 @@ function renderPrizes() {
             <span>${esc(c.name)}${variantTagHTML(c, true)}</span>
           </span>
           <span style="display:flex;align-items:center;gap:8px;">
+            ${drafterTagHTML(c, true)}
             ${c.imageStatus === "found" ? `<button class="variant-btn" data-variant="${c.id}" title="Choose the printing and finish">✨ ${c.printId ? "Change" : "Variant"}</button>` : ""}
             ${priceTagHTML(c, true)}
             <button class="x-btn" data-remove-card="${c.id}">✕</button>
@@ -1409,7 +1463,7 @@ function renderPrizes() {
         <button class="card-tile" data-claim="${c.id}">
           ${cardVisualHTML(c, "tile")}
           ${c.imageUrl ? `<span class="zoom-btn" data-zoom="${esc(c.imageUrl)}" title="Enlarge">🔍</span>` : ""}
-          <div class="card-tile-name">${esc(c.name)}${variantTagHTML(c)}${priceTagHTML(c, false)}</div>
+          <div class="card-tile-name">${esc(c.name)}${variantTagHTML(c)}${drafterTagHTML(c, false)}${priceTagHTML(c, false)}</div>
         </button>`));
     });
   }
@@ -1424,7 +1478,7 @@ function renderPrizes() {
       <div class="result-card">
         <div class="pname">${esc(p.name)}${cards.length ? `<span class="haul">${money(haul)}</span>` : ""}</div>
         ${cards.length === 0 ? `<p class="empty">No picks yet</p>` : cards.map((c) => `
-          <div class="result-card-item">${cardVisualHTML(c, "mini")}<span style="flex:1;">${esc(c.name)}${variantTagHTML(c)}</span>${priceTagHTML(c, false)}</div>`).join("")}
+          <div class="result-card-item">${cardVisualHTML(c, "mini")}<span style="flex:1;">${esc(c.name)}${variantTagHTML(c)}${drafterTagHTML(c, false)}</span>${priceTagHTML(c, false)}</div>`).join("")}
       </div>`));
   });
 }
@@ -1573,6 +1627,9 @@ document.getElementById("app").addEventListener("click", (e) => {
 
   const sp = e.target.closest("[data-set-price]");
   if (sp) return setManualPrice(sp.dataset.setPrice);
+
+  const sd = e.target.closest("[data-set-drafter]");
+  if (sd) return setDrafter(sd.dataset.setDrafter);
 
   const rc = e.target.closest("[data-remove-card]");
   if (rc) return removeCard(rc.dataset.removeCard);
