@@ -37,13 +37,10 @@ function randomCode() {
 function computeDefaultTab() {
   const started = !!state.started;
   const draftStarted = !!state.draftStarted;
-  const poolCount = Object.keys(state.prizePool || {}).length;
-  const claimsCount = Object.keys(state.claims || {}).length;
 
-  if (draftStarted) {
-    const draftComplete = poolCount > 0 && claimsCount >= poolCount;
-    return draftComplete ? "results" : "prizes";
-  }
+  // Once the prize draft has started, open on the Prize draft tab,
+  // both while it runs and after every prize has been claimed.
+  if (draftStarted) return "prizes";
   if (started) {
     const rounds = roundsArray();
     const totalRounds = state.totalRounds || 3;
