@@ -185,10 +185,12 @@ async function loadAllEvents() {
   list.innerHTML = events.length ? "" : `<p class="manage-empty">No tournaments yet.</p>`;
   events.forEach(({ code, ev, last }) => {
     const players = Object.keys(ev.players || {}).length;
+    const organizer = (ev.organizerName || "").trim() || (ev.organizerEmail || "").trim();
     list.appendChild(el(`
       <div class="event-row">
         <div class="event-info">
           <div class="event-name">${esc(ev.eventName || code)} <span class="event-code">${esc(code)}</span></div>
+          <div class="event-organizer">Organizer: ${organizer ? esc(organizer) : "<em>not set</em>"}</div>
           <div class="event-meta">${players} player${players === 1 ? "" : "s"} · ${eventStatus(ev)}${last ? " · " + new Date(last).toLocaleDateString() : ""}</div>
         </div>
         <div class="event-actions">
